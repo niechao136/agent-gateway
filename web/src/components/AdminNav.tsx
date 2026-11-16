@@ -7,7 +7,7 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import ChatIcon from "@mui/icons-material/Chat";
 import { logout } from "@/lib/api";
 
-export type AdminSection = "agents" | "users" | "models";
+export type AdminSection = "agents" | "users" | "models" | "a2a";
 
 /**
  * 管理中心顶部导航。
@@ -47,13 +47,25 @@ export function AdminNav({ current }: { current: AdminSection }) {
         onClick={() => router.push("/admin/models")}
         size="small"
         sx={{
-          mr: 2,
+          mr: 1,
           fontWeight: current === "models" ? 700 : 400,
           textDecoration: current === "models" ? "underline" : "none",
           textUnderlineOffset: 4,
         }}
       >
         模型
+      </Button>
+      <Button
+        onClick={() => router.push("/admin/a2a")}
+        size="small"
+        sx={{
+          mr: 2,
+          fontWeight: current === "a2a" ? 700 : 400,
+          textDecoration: current === "a2a" ? "underline" : "none",
+          textUnderlineOffset: 4,
+        }}
+      >
+        A2A
       </Button>
       <Button
         startIcon={<ChatIcon />}
