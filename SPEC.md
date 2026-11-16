@@ -1118,8 +1118,141 @@ async rewrites() {
 
 **改用 Docker 构建**（镜像内是 ext4），或把 web 目录放到 WSL 原生路径下开发。
 
-### 11.10 安全
+### 11.9.7 ⚠️ hermes session 的 title 必须全局唯一（致命）
 
+**这是导致"所有会话创建都失败"的根因。**
+
+```json
+// POST /api/sessions {"id": "...", "title": "你好"}
+// → 400
+{"error": {"message": "Title '你好' is already in use by session abc",
+           "code": "invalid_title"}}
+```
+
+hermes 对 `title` 做了**全局唯一约束**。而「你好」这种短消息做标题必然撞车——
+第二次用同样的话开头，会话就建不出来。
+
+hermes 自己生成标题时会自动加 ` #2` / ` #3` 后缀，但**显式传入的 title 不做处理**。
+
+**解决**：创建 session 时**不要传 title**，标题只在控制层本地生成并展示：
+
+```python
+# conversations.py
+await gw.create_session(sid)          # 不传 title
+conv.title = derive_title(first_message)  # 本地存
+```
+
+### 11.9.8 hermes 消息格式与历史恢复
+
+`GET /api/sessions/{id}/messages` 返回：
+
+```json
+[
+  {"role": "user", "content": "用一句话介绍你自己", "tool_calls": null, "tool_name": null},
+  {"role": "assistant", "content": "我是Hermes Agent，...", "tool_calls": null, "tool_name": null},
+  {"role": "session_meta", "content": null, "tool_calls": null, "tool_name": null}
+]
+```
+
+**必须过滤 `session_meta`**（hermes 内部记录），否则前端渲染出空消息。同样要过滤
+`system` / `run_meta`。多模态内容（`[{type:"text",text:"..."}]`）需拍平为文本。
+
+控制层在 `routes/chat.py::_normalize_messages` 做这层规范化。
+
+### 11.9.9 Gemini 模型接入（实测踩坑三连）
+
+本地无法直连 Google，且 hermes 的配置有几个反直觉的点。
+
+**坑 1：`OPENAI_API_KEY` 环境变量不生效**
+
+写进 `/opt/data/.env` 也没用——hermes 进程环境里看不到（有白名单）。
+必须用 `model.api_key` 内联或引用：
+
+```yaml
+model:
+  default: "gemini-2.5-flash"
+  provider: "custom"
+  base_url: "http://127.0.0.1:8899/v1beta/openai"
+  api_key: "AIza..."        # ← 必须在这里
+```
+
+**坑 2：`provider: gemini` 会发 `thinking_config`，而 flash-lite 不支持**
+
+```
+Invalid JSON payload received. Unknown name "thinking_config": Cannot find field.
+```
+
+实测对比（同一 key）：
+
+| 模型 | 带 thinkingConfig |
+|---|---|
+| `gemini-2.5-flash` | ✅ 接受 |
+| `gemini-3.5-flash-lite` | ❌ 400 |
+
+所以最终用 `gemini-2.5-flash`（虽然 lite 更便宜，但和 hermes 的 thinking 逻辑不兼容）。
+
+**坑 3：网络需要中转**
+
+本地 WSL 访问 `generativelanguage.googleapis.com` 超时。方案：
+
+```
+hermes 容器
+  └─ SSH 隧道 127.0.0.1:8899
+       └─ srv-01 的 gemini-proxy 容器（nginx 反代 Google）
+```
+
+服务器端（srv-01）：
+
+```sh
+docker run -d --name gemini-proxy -p 8899:8899 \
+  -v /tmp/gemini-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro nginx:1.27-alpine
+```
+
+容器内启动隧道：`/opt/data/start-tunnel.sh`（见 `scripts/start-tunnel.sh`）。
+
+**注意**：服务器 ufw 只放行 22/80/443，8899 从外部不可达——所以必须用 SSH 隧道，
+不能直接连服务器端口。
+
+### 11.9.10 管理员登录（补 `.env` 默认账号）
+
+管理中心需要一个 `scope=admin` 的 token，而用户登录只签发 `scope=user`。
+管理员凭据来自环境变量，不需要单独的 admin 表：
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<强密码>
+```
+
+`POST /api/auth/admin-login` 校验后签发 admin token。用 `secrets.compare_digest`
+防时序攻击；未配置密码返回 503（不是 500）。
+
+### 11.9.11 已验证的真实对话
+
+```
+$ curl -N -X POST .../conversations/5/stream -d '{"message":"说一句欢迎词"}'
+
+event: token
+data: {"content": "您"}
+
+event: token
+data: {"content": "好！"}
+
+event: done
+data: {"thread_id": "ag_u5_22de248561a5f4d7"}
+```
+
+历史恢复：
+
+```json
+{"messages": [
+  {"id":"h-0","role":"user","content":"说一句欢迎词"},
+  {"id":"h-1","role":"assistant","content":"您好！"}
+]}
+```
+
+**至此前端 → nginx → 控制层 → hermes → Gemini 全链路跑通。**
+
+### 11.10 安全
 - [ ] 无 `visitor` 相关代码残留
 - [ ] 无 speech/tts/asr 相关代码残留
 - [ ] `public` tier 的 Agent 无法执行 terminal 命令
