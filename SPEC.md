@@ -1306,6 +1306,70 @@ os.replace(tmp, path)   # 原子替换
 清理逻辑在 `conversations.hard_delete_expired()`：
 先调 hermes `DELETE /api/sessions/{id}`，再删控制层记录。
 
+### 11.11.3 隧道自动化
+
+`scripts/99-tunnel` 挂到 `/etc/cont-init.d/`，容器启动时自动建 SSH 隧道。
+
+两个踩到的坑：
+
+1. **私钥权限**：root 创建的 `600` 文件 hermes 读不到 → 必须 `chown hermes:hermes`
+2. **`s6-setuidgid` 不在 PATH**：cont-init 阶段要用绝对路径探测
+   （`/command/` 或 `/package/admin/s6/command/`）
+
+设计取舍：隧道失败**不阻塞**容器启动（`exit 0`），因为 hermes 本身仍可用，
+只是模型调用会失败——比容器起不来更容易排查。
+
+### 11.11.4 A2A 入站（已完成）
+
+启用方式：在 hermes 的 `.env` 里配置后重启。
+
+```env
+A2A_HOST=0.0.0.0
+A2A_PORT=9900
+A2A_BEARER_TOKEN=<强随机值>
+A2A_TRUSTED_PEERS=ip:127.0.0.1
+```
+
+**三项缺一不可**（实测，对应 §7.3）：
+
+| 缺失项 | 症状 |
+|---|---|
+| 无 token | 只绑 `127.0.0.1`，外部不可达 |
+| 无 `A2A_HOST=0.0.0.0` | 出不了容器 |
+| 无 `A2A_TRUSTED_PEERS` | dispatch 返回 `peer 'ip:x' not trusted`（403） |
+
+第三条最隐蔽：**服务能起、Agent Card 能拉到，但请求被拒**。
+
+验证结果：
+
+```
+POST /a2a  message/send
+→ 200 {"result": {"status": {"state": "TASK_STATE_COMPLETED",
+                             "message": {"parts": [{"text": "收到"}]}}}}
+```
+
+Agent Card 暴露 **32 个 skills**，`capabilities.streaming = true`。
+
+**探测地址的坑**：控制层与 hermes 在不同容器，探测必须用 compose 主机名
+`http://ag-hermes:9900`，不能用 `127.0.0.1`（否则 `reachable` 永远 false）。
+
+### 11.11.5 前端单元测试
+
+`web/src/lib/sse.test.ts` + `sseStream.test.ts`，**17 项**：
+
+- keepalive 跳过（单独 / 混在块内）
+- 空块、只有 event 无 data、多行 data 拼接
+- CRLF 兼容、data 冒号后空格剥离
+- **按任意字节边界切分仍能解析**（模拟网络分片）
+- 非法 JSON 跳过不崩溃
+
+本地 `pnpm` 装不上（9p 文件系统），运行方式：
+
+```sh
+docker build --target base -t ag-web-test ./web
+docker run --rm ag-web-test pnpm test
+```
+
 ### 11.10 安全
 - [ ] 无 `visitor` 相关代码残留
 - [ ] 无 speech/tts/asr 相关代码残留
