@@ -156,10 +156,18 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+    image: agent-gateway-web:dev
     container_name: ag-web
     restart: unless-stopped
+    environment:
+      # 服务端 rewrite 目标（/api/* → 控制层）
+      CONTROL_URL: http://ag-control:8000
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Shanghai}
     expose:
       - "3000"
+    depends_on:
+      - control
     profiles:
       - full
     networks:
