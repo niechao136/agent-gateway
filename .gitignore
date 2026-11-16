@@ -39,3 +39,7 @@ node_modules/
 out/
 next-env.d.ts
 .pnpm-store/
+
+# hermes 数据目录下的敏感文件（隧道私钥等）
+data/
+*tunnel_key*
