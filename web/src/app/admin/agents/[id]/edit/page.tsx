@@ -22,6 +22,7 @@ import { GuardedShell } from "@/lib/authGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { SkillsPanel } from "@/components/SkillsPanel";
 import { A2APanel } from "@/components/A2APanel";
+import { MCPPanel } from "@/components/MCPPanel";
 
 export default function EditAgentPage() {
   return (
@@ -208,6 +209,16 @@ function EditAgent() {
             配置该 Agent 可以调用的外部 Agent。保存后写入 profile 的 config.yaml。
           </Typography>
           <A2APanel agentId={id} />
+        </Paper>
+
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+            MCP 服务器
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            这些服务器提供的工具会挂到该 Agent 上。保存后写入 profile 的 config.yaml。
+          </Typography>
+          <MCPPanel agentId={id} />
         </Paper>
       </Container>
     </Box>

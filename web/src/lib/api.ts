@@ -303,6 +303,64 @@ export async function deleteA2AEndpoint(agentId: number, endpointId: number): Pr
   return request<void>(`/admin/agents/${agentId}/a2a/${endpointId}`, { method: "DELETE" });
 }
 
+// ── MCP 服务器 ────────────────────────────────────────────
+export interface MCPServer {
+  name: string;
+  transport: string;
+  url: string | null;
+  command: string | null;
+  args: string[] | null;
+  env: Record<string, string> | null;
+  enabled: boolean;
+  tools?: unknown;
+  source?: string | null;
+  plugin?: string | null;
+}
+
+export async function listMCP(agentId: number): Promise<{ profile: string; servers: MCPServer[] }> {
+  return request(`/admin/agents/${agentId}/mcp`);
+}
+
+export async function addMCP(
+  agentId: number,
+  body: {
+    name: string;
+    transport: string;
+    command?: string;
+    args?: string[];
+    url?: string;
+    enabled?: boolean;
+  },
+): Promise<MCPServer> {
+  return request(`/admin/agents/${agentId}/mcp`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteMCP(agentId: number, name: string): Promise<void> {
+  return request<void>(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testMCP(agentId: number, name: string): Promise<Record<string, unknown>> {
+  return request(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}/test`, {
+    method: "POST",
+  });
+}
+
+export async function toggleMCP(
+  agentId: number,
+  name: string,
+  enabled: boolean,
+): Promise<unknown> {
+  return request(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}/enabled`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 // ── 会话 ──────────────────────────────────────────────────
 export async function listConversations(agentSlug?: string): Promise<Conversation[]> {
   const q = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";
