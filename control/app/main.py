@@ -7,15 +7,21 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import init_models
-from .routes import agents, auth, chat
+from .routes import agents, auth, chat, users
+from .scheduler import CleanupTask
 
 _settings = get_settings()
+_cleanup = CleanupTask()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_models()
-    yield
+    _cleanup.start()
+    try:
+        yield
+    finally:
+        await _cleanup.stop()
 
 
 app = FastAPI(title="agent-gateway control", version="0.1.0", lifespan=lifespan)
@@ -31,6 +37,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(agents.admin_router)
 app.include_router(agents.user_router)
+app.include_router(users.router)
 app.include_router(chat.router)
 
 

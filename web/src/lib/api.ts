@@ -220,6 +220,36 @@ export async function unpublishAgent(id: number): Promise<Agent> {
   return request<Agent>(`/admin/agents/${id}/unpublish`, { method: "POST" });
 }
 
+export async function getAgent(id: number): Promise<Agent> {
+  return request<Agent>(`/admin/agents/${id}`);
+}
+
+// ── 用户管理 ──────────────────────────────────────────────
+export interface AdminUser {
+  id: number;
+  username: string;
+  email: string | null;
+  display_name: string | null;
+  disabled: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+  conversation_count: number;
+}
+
+export async function listUsers(): Promise<AdminUser[]> {
+  return request<AdminUser[]>("/admin/users");
+}
+
+export async function updateUser(
+  id: number,
+  body: { disabled?: boolean; display_name?: string },
+): Promise<AdminUser> {
+  return request<AdminUser>(`/admin/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 // ── 会话 ──────────────────────────────────────────────────
 export async function listConversations(agentSlug?: string): Promise<Conversation[]> {
   const q = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";

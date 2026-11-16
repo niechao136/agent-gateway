@@ -25,20 +25,19 @@ import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import AddIcon from "@mui/icons-material/Add";
-import LogoutIcon from "@mui/icons-material/Logout";
 import DeleteIcon from "@mui/icons-material/Delete";
-import ChatIcon from "@mui/icons-material/Chat";
+import EditIcon from "@mui/icons-material/Edit";
 import {
   ApiError,
   createAgent,
   deleteAgent,
   listAllAgents,
-  logout,
   publishAgent,
   unpublishAgent,
   type Agent,
 } from "@/lib/api";
 import { GuardedShell } from "@/lib/authGuard";
+import { AdminNav } from "@/components/AdminNav";
 
 export default function AdminPage() {
   return (
@@ -94,18 +93,7 @@ function AdminAgents() {
           <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
             管理中心
           </Typography>
-          <Button startIcon={<ChatIcon />} onClick={() => router.push("/chat")} sx={{ mr: 1 }}>
-            去对话
-          </Button>
-          <Button
-            startIcon={<LogoutIcon />}
-            onClick={() => {
-              logout();
-              router.replace("/login");
-            }}
-          >
-            退出
-          </Button>
+          <AdminNav current="agents" />
         </Toolbar>
       </AppBar>
 
@@ -176,6 +164,13 @@ function AdminAgents() {
                     <Button size="small" onClick={() => void toggle(a)}>
                       {a.status === "published" ? "下线" : "发布"}
                     </Button>
+                    <IconButton
+                      size="small"
+                      aria-label="编辑"
+                      onClick={() => router.push(`/admin/agents/${a.id}/edit`)}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
                     <IconButton size="small" aria-label="删除" onClick={() => void remove(a)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
