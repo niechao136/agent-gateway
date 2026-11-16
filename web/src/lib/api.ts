@@ -250,6 +250,31 @@ export async function updateUser(
   });
 }
 
+// ── Agent Skills ──────────────────────────────────────────
+export interface AgentSkill {
+  name: string;
+  description: string | null;
+  category: string | null;
+  enabled: boolean;
+  locked: boolean;
+  provenance: string | null;
+}
+
+export async function listAgentSkills(agentId: number): Promise<AgentSkill[]> {
+  return request<AgentSkill[]>(`/admin/agents/${agentId}/skills`);
+}
+
+export async function toggleAgentSkill(
+  agentId: number,
+  name: string,
+  enabled: boolean,
+): Promise<AgentSkill> {
+  return request<AgentSkill>(`/admin/agents/${agentId}/skills/toggle`, {
+    method: "POST",
+    body: JSON.stringify({ name, enabled }),
+  });
+}
+
 // ── 会话 ──────────────────────────────────────────────────
 export async function listConversations(agentSlug?: string): Promise<Conversation[]> {
   const q = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";

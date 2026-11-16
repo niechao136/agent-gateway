@@ -20,6 +20,7 @@ import IconButton from "@mui/material/IconButton";
 import { ApiError, getAgent, updateAgent, type Agent } from "@/lib/api";
 import { GuardedShell } from "@/lib/authGuard";
 import { AdminNav } from "@/components/AdminNav";
+import { SkillsPanel } from "@/components/SkillsPanel";
 
 export default function EditAgentPage() {
   return (
@@ -186,6 +187,16 @@ function EditAgent() {
               修改配置后，<strong>新会话</strong>生效；已存在的会话保持原配置。
             </Alert>
           </Stack>
+        </Paper>
+
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+            Skills
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            启用后该 Agent 的会话即可使用这些技能。hermes 的 skill 是 profile 级开关。
+          </Typography>
+          <SkillsPanel agentId={id} />
         </Paper>
       </Container>
     </Box>

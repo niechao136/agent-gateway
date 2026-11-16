@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import init_models
-from .routes import agents, auth, chat, users
+from .routes import agent_skills, agents, auth, chat, users
 from .scheduler import CleanupTask
 
 _settings = get_settings()
@@ -36,6 +36,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(agents.admin_router)
+app.include_router(agent_skills.router)
 app.include_router(agents.user_router)
 app.include_router(users.router)
 app.include_router(chat.router)
