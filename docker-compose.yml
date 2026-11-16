@@ -67,6 +67,8 @@ services:
     volumes:
       # ★ 关键：绝对路径指向 ext4，不能用 /mnt/d
       - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/data
+      # 容器启动时自动建立 Gemini 代理隧道（cont-init 阶段执行，root 权限）
+      - ./scripts/99-tunnel:/etc/cont-init.d/99-tunnel:ro
     expose:
       - "8642"
       - "9119"

@@ -1,0 +1,69 @@
+#!/bin/sh
+# cont-init 脚本：容器启动时自动建立 Gemini 代理的 SSH 隧道。
+#
+# 为什么需要（SPEC §11.9.9）：
+#   本地无法直连 generativelanguage.googleapis.com，需要经 srv-01 上的
+#   gemini-proxy 容器（8899）中转。隧道在容器重启后会消失，必须重建。
+#
+# 安装方式：compose 把本文件挂到 /etc/cont-init.d/99-tunnel，
+#   由 s6 的 cont-init 阶段自动执行（root 权限）。
+#
+# 说明：这里**不阻塞** cont-init。隧道失败不应阻止容器启动——
+#   hermes 本身仍可用，只是模型调用会失败。
+set -u
+
+MARK="[tunnel-init]"
+KEY=/opt/data/.ssh_tunnel_key
+HOST="${TUNNEL_HOST:-ubuntu@43.156.187.79}"
+PORT="${TUNNEL_PORT:-8899}"
+
+if [ ! -f "$KEY" ]; then
+    echo "$MARK 未找到 $KEY，跳过（仅当需要 Gemini 中转时才需要）"
+    exit 0
+fi
+
+# 幂等：已有隧道则跳过
+if pgrep -f "ssh .* -L 127.0.0.1:${PORT}" >/dev/null 2>&1; then
+    echo "$MARK 隧道已存在"
+    exit 0
+fi
+
+cp "$KEY" /tmp/.tk 2>/dev/null || { echo "$MARK 复制私钥失败"; exit 0; }
+chmod 600 /tmp/.tk
+# ★ 必须 chown 给 hermes：root 创建的 600 文件，hermes 读不到（实测踩过）
+chown hermes:hermes /tmp/.tk 2>/dev/null || true
+
+# s6-setuidgid 在 cont-init 阶段不在 PATH 上，要用绝对路径
+S6_SETUIDGID=""
+for p in /command/s6-setuidgid /package/admin/s6/command/s6-setuidgid; do
+    [ -x "$p" ] && { S6_SETUIDGID="$p"; break; }
+done
+
+if [ -n "$S6_SETUIDGID" ]; then
+    "$S6_SETUIDGID" hermes ssh -i /tmp/.tk -N \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ExitOnForwardFailure=yes \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=3 \
+        -L "127.0.0.1:${PORT}:127.0.0.1:${PORT}" \
+        "$HOST" >/var/log/tunnel.log 2>&1 &
+else
+    echo "$MARK 找不到 s6-setuidgid，改用 su"
+    su hermes -s /bin/sh -c "ssh -i /tmp/.tk -N \
+        -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+        -L 127.0.0.1:${PORT}:127.0.0.1:${PORT} ${HOST}" >/var/log/tunnel.log 2>&1 &
+fi
+
+sleep 5
+
+if pgrep -f "ssh .* -L 127.0.0.1:${PORT}" >/dev/null 2>&1; then
+    echo "$MARK 隧道已建立 127.0.0.1:${PORT} -> ${HOST}:${PORT}"
+else
+    echo "$MARK 隧道建立失败（不阻塞启动），日志："
+    tail -3 /var/log/tunnel.log 2>/dev/null || true
+fi
+
+exit 0
