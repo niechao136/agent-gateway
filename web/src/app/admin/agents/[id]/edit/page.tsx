@@ -21,6 +21,7 @@ import { ApiError, getAgent, updateAgent, type Agent } from "@/lib/api";
 import { GuardedShell } from "@/lib/authGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { SkillsPanel } from "@/components/SkillsPanel";
+import { A2APanel } from "@/components/A2APanel";
 
 export default function EditAgentPage() {
   return (
@@ -197,6 +198,16 @@ function EditAgent() {
             启用后该 Agent 的会话即可使用这些技能。hermes 的 skill 是 profile 级开关。
           </Typography>
           <SkillsPanel agentId={id} />
+        </Paper>
+
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+            A2A 端点
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            配置该 Agent 可以调用的外部 Agent。保存后写入 profile 的 config.yaml。
+          </Typography>
+          <A2APanel agentId={id} />
         </Paper>
       </Container>
     </Box>

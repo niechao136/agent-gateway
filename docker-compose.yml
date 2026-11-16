@@ -137,8 +137,10 @@ services:
       SOFT_DELETE_RETENTION_DAYS: ${SOFT_DELETE_RETENTION_DAYS:-30}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      # 只读挂载 hermes 数据目录，用于读取实际生效的 API_SERVER_KEY
-      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/hermes-data:ro
+      # hermes 数据目录：读写挂载。
+      # - 读：解析实际生效的 API_SERVER_KEY（hermes 会用 .env 覆盖环境变量）
+      # - 写：A2A 配置需要改 profile 的 config.yaml（原子写 + rename）
+      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/hermes-data
     expose:
       - "8000"
     depends_on:

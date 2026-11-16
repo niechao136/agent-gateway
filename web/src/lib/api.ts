@@ -275,6 +275,34 @@ export async function toggleAgentSkill(
   });
 }
 
+// ── A2A 端点 ──────────────────────────────────────────────
+export interface A2AEndpoint {
+  id: number;
+  name: string;
+  url: string;
+  capabilities: string[];
+  timeout: number;
+  enabled: boolean;
+}
+
+export async function listA2AEndpoints(agentId: number): Promise<A2AEndpoint[]> {
+  return request<A2AEndpoint[]>(`/admin/agents/${agentId}/a2a`);
+}
+
+export async function createA2AEndpoint(
+  agentId: number,
+  body: { name: string; url: string; capabilities: string[]; timeout: number },
+): Promise<{ endpoint: A2AEndpoint; apply_error: string | null }> {
+  return request(`/admin/agents/${agentId}/a2a`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteA2AEndpoint(agentId: number, endpointId: number): Promise<void> {
+  return request<void>(`/admin/agents/${agentId}/a2a/${endpointId}`, { method: "DELETE" });
+}
+
 // ── 会话 ──────────────────────────────────────────────────
 export async function listConversations(agentSlug?: string): Promise<Conversation[]> {
   const q = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";

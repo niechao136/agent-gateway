@@ -15,6 +15,7 @@ dependencies = [
     "bcrypt>=4.2.0",
     "pydantic-settings>=2.6.0",
     "pydantic[email]>=2.9.0",   # EmailStr 需要 email-validator
+    "pyyaml>=6.0.2",            # A2A：读写 profile 的 config.yaml
     "python-multipart>=0.0.12",
 ]
 

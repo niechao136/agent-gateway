@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     #    （见 hermes/gateway.py::resolve_api_key）。
     hermes_api_key: str = ""
     hermes_dotenv_path: str = "/opt/hermes-data/.env"
+    # hermes 数据目录（控制层挂载为读写，用于 A2A 配置写入）
+    hermes_data_root: str = "/opt/hermes-data"
 
     # ── 会话软删保留期（SPEC §12.1 决策 4）──
     soft_delete_retention_days: int = 30

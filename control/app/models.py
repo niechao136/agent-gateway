@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -81,6 +82,39 @@ class Agent(Base):
     )
 
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="agent")
+    a2a_endpoints: Mapped[list["A2AEndpoint"]] = relationship(
+        back_populates="agent", cascade="all, delete-orphan"
+    )
+
+
+class A2AEndpoint(Base):
+    """A2A 出站端点：定义在控制层，下发到 profile 的 config.yaml。
+
+    一个 Agent 可以有多个端点（对应 hermes 的 a2a_agents.<name>）。
+    """
+
+    __tablename__ = "a2a_endpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+
+    # 会成为 config.yaml 里的 key，必须符合 YAML 安全标识符
+    name: Mapped[str] = mapped_column(String(64))
+    url: Mapped[str] = mapped_column(String(512))
+
+    # a2a_orchestrate 的路由依据
+    capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    timeout: Mapped[int] = mapped_column(Integer, default=120)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    agent: Mapped["Agent"] = relationship(back_populates="a2a_endpoints")
 
 
 class Conversation(Base):
