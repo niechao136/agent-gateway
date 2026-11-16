@@ -1252,6 +1252,60 @@ data: {"thread_id": "ag_u5_22de248561a5f4d7"}
 
 **至此前端 → nginx → 控制层 → hermes → Gemini 全链路跑通。**
 
+### 11.11 管理中心完整功能（已完成）
+
+| 功能 | 端点 | 状态 |
+|---|---|---|
+| 管理员登录 | `POST /api/auth/admin-login` | ✅ |
+| Agent CRUD | `/api/admin/agents*` | ✅ |
+| Agent 编辑页 | `/admin/agents/{id}/edit` | ✅ |
+| 用户管理 | `GET/PATCH /api/admin/users*` | ✅ |
+| Skill 开关 | `/api/admin/agents/{id}/skills*` | ✅ |
+| A2A 端点 | `/api/admin/agents/{id}/a2a*` | ✅ |
+| 软删清理 | 后台定时任务（24h 一次） | ✅ |
+
+**测试：102 项全通过。**
+
+### 11.11.1 Skill 与 A2A 的实现差异（重要）
+
+这两者 hermes 的接口能力完全不同，实现方式也不同：
+
+| | Skill | A2A |
+|---|---|---|
+| hermes 支持 | **有 API**（`GET /api/skills?profile=`, `PUT /api/skills/toggle`） | **没有写接口** |
+| 实现方式 | 走 dashboard cookie 会话 | **直接改 profile 的 config.yaml** |
+| 语义 | profile 级**开关**（不是复制文件） | 写入 `a2a_agents` 段 |
+| 生效 | 立即可用 | 需重载 profile |
+
+**A2A 为什么不用 `hermes config set`**：那需要 docker CLI + `docker.sock`，
+等于把宿主机 root 权限交给控制层；而 apt 安装 docker CLI 在国内环境下会超时。
+改为直接读写文件后，控制层只需挂载 hermes 数据目录。
+
+**直接写文件的代价与对策**：
+
+```python
+# 原子写：临时文件 + fsync + rename
+fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".cfg-", suffix=".tmp")
+# ... 写入并 fsync ...
+os.replace(tmp, path)   # 原子替换
+```
+
+- 用 `yaml.safe_load` → 修改 → `yaml.safe_dump`，**保留 model 等其他段**
+- 写入失败**不回滚 DB**，接口返回 `apply_error`，用户可修好环境后重试
+- 整体替换 `a2a_agents` 段，避免残留已删除端点
+
+### 11.11.2 软删清理任务
+
+`control/app/scheduler.py`：
+
+- 应用启动后 **60 秒**首次执行（避开建表/迁移）
+- 之后每 **24 小时**一次
+- 优雅停止：lifespan 关闭时 `await task.stop()`
+- 幂等启动：重复 `start()` 不新建任务
+
+清理逻辑在 `conversations.hard_delete_expired()`：
+先调 hermes `DELETE /api/sessions/{id}`，再删控制层记录。
+
 ### 11.10 安全
 - [ ] 无 `visitor` 相关代码残留
 - [ ] 无 speech/tts/asr 相关代码残留
