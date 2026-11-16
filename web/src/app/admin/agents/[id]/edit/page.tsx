@@ -23,6 +23,7 @@ import { AdminNav } from "@/components/AdminNav";
 import { SkillsPanel } from "@/components/SkillsPanel";
 import { A2APanel } from "@/components/A2APanel";
 import { MCPPanel } from "@/components/MCPPanel";
+import { ModelPanel } from "@/components/ModelPanel";
 
 export default function EditAgentPage() {
   return (
@@ -219,6 +220,16 @@ function EditAgent() {
             这些服务器提供的工具会挂到该 Agent 上。保存后写入 profile 的 config.yaml。
           </Typography>
           <MCPPanel agentId={id} />
+        </Paper>
+
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+            模型
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            应用模型模板会写入该 Agent 的 profile 配置（其他配置保留）。
+          </Typography>
+          <ModelPanel agentId={id} />
         </Paper>
       </Container>
     </Box>

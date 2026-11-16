@@ -87,6 +87,27 @@ class Agent(Base):
     )
 
 
+class ModelTemplate(Base):
+    """模型模板：可复用的模型配置，下发给 profile 的 config.yaml: model 段。
+
+    存在控制层的理由：用户不想每次创建 Agent 都手填 provider/base_url/api_key。
+    """
+
+    __tablename__ = "model_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="custom")
+    model: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # API key 明文存控制层 DB（个人项目可接受；生产应改用引用）
+    api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class A2AEndpoint(Base):
     """A2A 出站端点：定义在控制层，下发到 profile 的 config.yaml。
 

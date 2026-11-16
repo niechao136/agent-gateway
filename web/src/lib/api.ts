@@ -361,6 +361,55 @@ export async function toggleMCP(
   });
 }
 
+// ── 模型模板 ──────────────────────────────────────────────
+export interface ModelTemplate {
+  id: number;
+  name: string;
+  model: string;
+  provider: string;
+  base_url: string | null;
+  has_api_key: boolean;
+  description: string | null;
+  created_at: string | null;
+}
+
+export async function listModelTemplates(): Promise<ModelTemplate[]> {
+  return request<ModelTemplate[]>("/admin/models");
+}
+
+export async function createModelTemplate(body: {
+  name: string;
+  model: string;
+  provider?: string;
+  base_url?: string;
+  api_key?: string;
+  description?: string;
+}): Promise<ModelTemplate> {
+  return request<ModelTemplate>("/admin/models", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteModelTemplate(id: number): Promise<void> {
+  return request<void>(`/admin/models/${id}`, { method: "DELETE" });
+}
+
+export async function applyModelTemplate(
+  agentId: number,
+  templateId: number,
+): Promise<{ applied: boolean; model: string }> {
+  return request(`/admin/agents/${agentId}/apply-model/${templateId}`, {
+    method: "POST",
+  });
+}
+
+export async function getEffectiveModel(
+  agentId: number,
+): Promise<{ profile: string; model: Record<string, unknown> }> {
+  return request(`/admin/agents/${agentId}/effective-model`);
+}
+
 // ── 会话 ──────────────────────────────────────────────────
 export async function listConversations(agentSlug?: string): Promise<Conversation[]> {
   const q = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";
