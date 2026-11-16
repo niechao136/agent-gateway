@@ -11,10 +11,16 @@ class Settings(BaseSettings):
     # ── 数据库 ──
     database_url: str = "postgresql+asyncpg://agent_gateway:changeme@localhost:5432/agent_gateway"
 
-    # ── 鉴权 ──
+    # ── 鉴定 ──
     jwt_secret: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 天
+
+    # ── 默认管理员（来自 .env）──
+    # 因为不需要单独的管理员表，管理中心账号由环境变量提供。
+    # 生产环境务必改掉默认密码。
+    admin_username: str = "admin"
+    admin_password: str = "admin12345"
 
     # ── 注册开关（SPEC §12 决策 1）──
     allow_registration: bool = True

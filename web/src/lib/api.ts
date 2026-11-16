@@ -156,6 +156,24 @@ export async function login(username: string, password: string): Promise<TokenRe
   return r;
 }
 
+/** 管理员登录：scope=admin，进入管理中心。 */
+export async function adminLogin(
+  username: string,
+  password: string,
+): Promise<{ access_token: string }> {
+  const r = await request<{ access_token: string; scope: string }>("/auth/admin-login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+  // 管理员没有 users 表记录，用一个占位 user 对象存 scope
+  saveSession(
+    r.access_token,
+    { id: 0, username, email: null, display_name: "管理员" },
+    "admin",
+  );
+  return r;
+}
+
 export async function me(): Promise<UserInfo> {
   return request<UserInfo>("/auth/me");
 }
@@ -226,8 +244,11 @@ export async function deleteConversation(id: number): Promise<void> {
   return request<void>(`/chat/conversations/${id}`, { method: "DELETE" });
 }
 
-export async function getMessages(id: number, limit = 100): Promise<unknown[]> {
-  const r = await request<{ messages: unknown[] }>(
+export async function getMessages(
+  id: number,
+  limit = 200,
+): Promise<{ id: string; role: string; content: string; toolName?: string }[]> {
+  const r = await request<{ messages: { id: string; role: string; content: string; toolName?: string }[] }>(
     `/chat/conversations/${id}/messages?limit=${limit}`,
   );
   return r.messages;

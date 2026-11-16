@@ -140,9 +140,15 @@ async def get_messages(
     conversation_id: int,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
-    limit: int = 100,
+    limit: int = 200,
 ) -> dict:
-    """从 hermes 拉历史消息。"""
+    """从 hermes 拉历史消息，转成前端可直接渲染的格式。
+
+    实测 hermes 消息格式（见 SPEC §11.9.8）：
+        {"role": "user"|"assistant"|"tool"|"session_meta", "content": ..., "tool_name": ...}
+
+    ★ `session_meta` 是 hermes 内部记录，必须过滤掉，否则前端会渲染出空消息。
+    """
     try:
         conv = await conv_svc.get_owned_conversation(
             session, user=user, conversation_id=conversation_id
@@ -152,10 +158,73 @@ async def get_messages(
 
     async with gw_mod.GatewayClient() as gw:
         try:
-            msgs = await gw.session_messages(conv.hermes_session_id, limit=limit)
+            raw = await gw.session_messages(conv.hermes_session_id, limit=limit)
         except gw_mod.GatewayError as exc:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"读取历史失败: {exc}") from exc
-    return {"conversation_id": conversation_id, "messages": msgs}
+
+    return {
+        "conversation_id": conversation_id,
+        "messages": _normalize_messages(raw),
+    }
+
+
+# hermes 内部角色，不展示给用户
+_HIDDEN_ROLES = frozenset({"session_meta", "system", "run_meta"})
+
+
+def _normalize_messages(raw: list[dict]) -> list[dict]:
+    """把 hermes 消息转成前端契约。
+
+    目标形状与前端 ChatMessage 对齐：
+        {"id", "role": "user"|"assistant"|"tool"|"error", "content", "toolName"?}
+    """
+    out: list[dict] = []
+    for i, m in enumerate(raw or []):
+        role = (m.get("role") or "").strip()
+        if not role or role in _HIDDEN_ROLES:
+            continue
+
+        content = m.get("content")
+        if content is None:
+            continue
+        if not isinstance(content, str):
+            # 多模态内容拼成纯文本
+            content = _flatten_content(content)
+        if not content.strip() and role != "tool":
+            continue
+
+        mapped_role = {"user": "user", "assistant": "assistant", "tool": "tool"}.get(role)
+        if mapped_role is None:
+            # 未知角色（如 function）按 assistant 处理，避免丢内容
+            mapped_role = "assistant"
+
+        item: dict = {
+            "id": f"h-{i}",
+            "role": mapped_role,
+            "content": content,
+        }
+        tool_name = m.get("tool_name")
+        if isinstance(tool_name, str) and tool_name:
+            item["toolName"] = tool_name
+        out.append(item)
+    return out
+
+
+def _flatten_content(content: object) -> str:
+    """把 [{type:"text", text:"..."}] 之类的多模态结构拍平成文本。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, dict):
+                t = p.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(p, str):
+                parts.append(p)
+        return "\n".join(parts)
+    return str(content)
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)

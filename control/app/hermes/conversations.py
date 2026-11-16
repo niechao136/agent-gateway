@@ -102,6 +102,12 @@ async def create_conversation(
 ) -> Conversation:
     """为用户 + Agent 创建新会话。
 
+    ⚠️ 关键约束（实测，见 SPEC §11.9.7）：
+    hermes 要求 session **title 全局唯一**，重复会返回
+    400 `invalid_title`（"Title 'X' is already in use by session Y"）。
+    而"你好"这类短消息做标题必然撞车，所以**创建时不要传 title**，
+    改用本地生成的可辨识标题，只在控制层展示。
+
     先建 hermes session，再写控制层记录（失败即整体失败，不留孤儿）。
     """
     sid = new_session_id(user.id)
@@ -109,9 +115,9 @@ async def create_conversation(
 
     async with GatewayClient() as gw:
         try:
-            await gw.create_session(sid, title=title)
+            # 不传 title：避免全局唯一约束冲突
+            await gw.create_session(sid)
         except GatewayError as exc:
-            # 409 极少见（随机 id 冲突），当作可重试错误暴露
             raise ConversationError(f"创建 hermes 会话失败: {exc}") from exc
 
     conv = Conversation(

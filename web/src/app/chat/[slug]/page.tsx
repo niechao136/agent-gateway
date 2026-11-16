@@ -26,6 +26,7 @@ import {
   ApiError,
   createConversation,
   deleteConversation,
+  getMessages,
   listConversations,
   type Conversation,
 } from "@/lib/api";
@@ -44,8 +45,9 @@ export default function ChatPage() {
 
 function ChatView() {
   const router = useRouter();
-  const params = useParams<{ slug: string }>();
+  const params = useParams<{ slug: string; threadId?: string }>();
   const slug = params.slug;
+  const urlThreadId = params.threadId ? Number(params.threadId) : null;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -54,6 +56,7 @@ function ChatView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -70,6 +73,14 @@ function ChatView() {
     void refreshConversations();
   }, [refreshConversations]);
 
+  // URL 带 threadId 时自动打开该会话
+  useEffect(() => {
+    if (urlThreadId && Number.isFinite(urlThreadId) && urlThreadId > 0) {
+      void selectConversation(urlThreadId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlThreadId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -82,6 +93,29 @@ function ChatView() {
     setActiveId(conv.id);
     setConversations((prev) => [conv, ...prev]);
     return conv.id;
+  }
+
+  /** 点击历史会话时加载消息（刷新页面后不丢对话）。 */
+  async function selectConversation(id: number) {
+    setActiveId(id);
+    setDrawer(false);
+    setMessages([]);
+    setLoadingHistory(true);
+    try {
+      const history = await getMessages(id);
+      setMessages(
+        history.map((m) => ({
+          id: m.id,
+          role: (m.role as ChatMessage["role"]) ?? "assistant",
+          content: m.content,
+          toolName: m.toolName,
+        })),
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加载历史失败");
+    } finally {
+      setLoadingHistory(false);
+    }
   }
 
   async function send() {
@@ -199,7 +233,11 @@ function ChatView() {
             </Alert>
           ) : null}
 
-          {messages.length === 0 ? (
+          {loadingHistory ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : messages.length === 0 ? (
             <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
               <Typography variant="body1">开始一段新对话</Typography>
               <Typography variant="body2" sx={{ mt: 0.5 }}>
@@ -269,11 +307,7 @@ function ChatView() {
                 <ListItemButton
                   key={c.id}
                   selected={c.id === activeId}
-                  onClick={() => {
-                    setActiveId(c.id);
-                    setMessages([]);
-                    setDrawer(false);
-                  }}
+                  onClick={() => void selectConversation(c.id)}
                 >
                   <ListItemText
                     primary={c.title || "未命名会话"}

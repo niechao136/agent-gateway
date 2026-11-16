@@ -4,6 +4,7 @@
 """
 
 import re
+import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -119,3 +120,39 @@ async def login(
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
+
+
+# ── 管理员登录 ────────────────────────────────────────────
+# 管理员不需要单独的数据库表：凭据来自 .env（ADMIN_USERNAME / ADMIN_PASSWORD）。
+# 这样个人项目足够，且首次启动即可进入管理中心。
+class AdminLoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class AdminTokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    scope: str = "admin"
+
+
+@router.post("/admin-login", response_model=AdminTokenOut)
+async def admin_login(body: AdminLoginIn) -> AdminTokenOut:
+    expected_user = _settings.admin_username
+    expected_pass = _settings.admin_password
+
+    if not expected_pass:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未配置管理员密码（ADMIN_PASSWORD）",
+        )
+
+    user_ok = secrets.compare_digest(body.username, expected_user)
+    pass_ok = secrets.compare_digest(body.password, expected_pass)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="管理员账号或密码错误"
+        )
+
+    token = create_access_token(expected_user, "admin")
+    return AdminTokenOut(access_token=token)
