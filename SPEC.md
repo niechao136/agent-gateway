@@ -1060,6 +1060,64 @@ sqlite3.IntegrityError: NOT NULL constraint failed: conversations.id
 - [ ] 长工具调用时（>10s）不超时（keepalive 被正确跳过）
 - [ ] 刷新页面后历史正确恢复
 
+### 11.9.4 前端（已完成，第 6 步）
+
+构建通过（`pnpm build`），7 个路由全部生成：
+
+```
+○ /            ○ /login      ○ /register
+○ /admin       ○ /chat
+ƒ /chat/[slug] ○ /_not-found
+```
+
+**端到端验证（经 nginx :10099）**：
+
+- [x] `/`、`/login`、`/register` 均返回 200
+- [x] `POST /api/auth/register` 经 nginx → 201 + JWT
+- [x] `POST /api/auth/login` → 200
+- [x] 带 token 拉 `/api/chat/agents` → 返回已发布 Agent（含 9 项 disabled_toolsets）
+- [x] 创建会话 → 201
+- [x] **SSE 经 nginx 逐帧回传，未被缓冲**
+
+### 11.9.5 ⚠️ 前端三个构建坑
+
+**1. MUI 9 的 Typography 不再接受布局类 prop**
+
+```tsx
+// ✗ 编译报错 TS2769
+<Typography variant="h5" fontWeight={700} textAlign="center">
+
+// ✓ 必须用 sx
+<Typography variant="h5" sx={{ fontWeight: 700, textAlign: "center" }}>
+```
+
+MUI 9 收紧了 Typography 的 prop 类型，`fontWeight` / `textAlign` 等都不再是直接属性。
+
+**2. 图标命名**
+
+`@mui/icons-material/ChatBubbleOutline`、`/DeleteOutline` 在 9.x 中不存在。
+用基础名 `Chat` / `Delete` 最稳妥（所有版本都有）。
+
+**3. `rewrites` 在 build 时求值并写死**
+
+```ts
+// next.config.ts
+async rewrites() {
+  const target = process.env.CONTROL_URL ?? "http://127.0.0.1:8000";
+  return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
+}
+```
+
+第一次打包时 `CONTROL_URL` 是默认值 `127.0.0.1:8000`，部署到容器后**运行时改环境变量无效**，导致 `ECONNREFUSED 127.0.0.1:8000`。
+
+**解决**：作为构建参数传入（Dockerfile 里 `ARG CONTROL_URL` + `ENV CONTROL_URL`），或者干脆让 nginx 直接反代 `/api/*`（当前采用后者，更可控）。
+
+### 11.9.6 开发环境注意：不要在 9p 上跑 pnpm install
+
+`/mnt/d` 是 9p 文件系统，`pnpm install` 会长时间卡在 `node_modules` 创建阶段（实测超时 10 分钟仍未完成）。
+
+**改用 Docker 构建**（镜像内是 ext4），或把 web 目录放到 WSL 原生路径下开发。
+
 ### 11.10 安全
 
 - [ ] 无 `visitor` 相关代码残留
