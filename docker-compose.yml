@@ -1,0 +1,188 @@
+# agent-gateway — 开发环境编排
+#
+# 设计要点（详见 SPEC.md §8）：
+#   1. 用自定义 bridge 网络，不用 network_mode: host（否则容器名无法互访）
+#   2. hermes 的 /opt/data 用 bind mount，但**必须**落在 WSL 的 ext4 上
+#      （9p/drvfs 会让 SQLite WAL 静默损坏）
+#   3. **hermes 只起一个容器**：gateway 与 dashboard 由 s6 在同一容器内监管。
+#      两个容器共享同一个 /opt/data 会争抢 gateway.lock，导致 dashboard
+#      反复崩溃重启（实测 RestartCount 持续增长）。
+#   4. 控制层与 hermes 走内网，不对外暴露端口
+#
+# 用法（在 WSL 内执行）：
+#   cd /mnt/d/agent/agent-gateway
+#   docker compose up -d
+#
+# 数据目录（ext4，WAL 安全）：
+#   ~/agent-gateway/data/hermes    → /opt/data
+#   ~/agent-gateway/data/postgres  → /var/lib/postgresql/data
+
+name: agent-gateway
+
+services:
+  # ───────────────────────────────────────────────────────────
+  # hermes：单容器，s6 同时监管 gateway 与 dashboard
+  #   - gateway   : 8642   OpenAI 兼容 API（公开聊天）
+  #   - dashboard : 9119   profile / skills / mcp 管理 API
+  # 不 publish 端口，仅供控制层与 nginx 内网访问
+  # ───────────────────────────────────────────────────────────
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: ag-hermes
+    restart: unless-stopped
+    # ★ 必须显式指定 command。
+    # 不传参时 CMD 走 `hermes`（交互式 CLI），启动后立即退出，
+    # 容器会无限重启（实测 RestartCount 持续增长、端口随机漂移）。
+    # `gateway run` 才是常驻进程；dashboard 由 s6 在同一容器内监管。
+    command: ["gateway", "run"]
+    environment:
+      HERMES_UID: ${HERMES_UID:-1000}
+      HERMES_GID: ${HERMES_GID:-1000}
+      TZ: ${TZ:-Asia/Shanghai}
+
+      # ── OpenAI 兼容 API server（公开聊天走这里）──
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_PORT: "8642"
+      # ★ 注意：hermes 会把 /opt/data/.env 以 override=True 加载，
+      #   .env 中的同名变量会**覆盖**容器环境变量。
+      #   首次启动时 hermes 会自己生成 API_SERVER_KEY 写入 /opt/data/.env。
+      #   因此控制层**必须**从 /opt/data/.env 读取实际生效的 key，
+      #   而不是用 compose 里的值（否则必然 401，实测踩过）。
+      #   控制层通过 HERMES_API_KEY 显式注入，见下方 control 服务。
+      API_SERVER_KEY: ${API_SERVER_KEY:?API_SERVER_KEY is required}
+
+      # ── 多 profile 路由：/p/<profile>/v1/... ──
+      GATEWAY_MULTIPLEX_PROFILES: "true"
+
+      # ── dashboard（与 gateway 同容器，由 s6 监管）──
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_PORT: "9119"
+      # 容器内绑 0.0.0.0，否则同网络的其他容器访问不到
+      HERMES_DASHBOARD_HOST: "0.0.0.0"
+      # 非 loopback 绑定**必须**有 auth provider，否则启动即失败
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${DASHBOARD_USER:?DASHBOARD_USER is required}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${DASHBOARD_SECRET:?DASHBOARD_SECRET is required}
+    volumes:
+      # ★ 关键：绝对路径指向 ext4，不能用 /mnt/d
+      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/data
+    expose:
+      - "8642"
+      - "9119"
+    healthcheck:
+      # /health 需要 API_SERVER_ENABLED + Bearer
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -H "Authorization: Bearer $$API_SERVER_KEY"
+          http://127.0.0.1:8642/health || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # s6 的 cont-init（chown / profile reconcile / dashboard toggle）需要时间
+      start_period: 90s
+    networks:
+      - ag-net
+
+  # ───────────────────────────────────────────────────────────
+  # 控制层数据库
+  # ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent_gateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_gateway}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/home/niechao/agent-gateway/data/postgres}:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_gateway} -d ${POSTGRES_DB:-agent_gateway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ag-net
+
+  # ───────────────────────────────────────────────────────────
+  # 控制层后端（第 2 步起逐步填充）
+  # ───────────────────────────────────────────────────────────
+  control:
+    build:
+      context: ./control
+      dockerfile: Dockerfile
+    container_name: ag-control
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent_gateway}:${POSTGRES_PASSWORD}@ag-postgres:5432/${POSTGRES_DB:-agent_gateway}
+      HERMES_DASHBOARD_URL: http://ag-hermes:9119
+      HERMES_DASHBOARD_USER: ${DASHBOARD_USER}
+      HERMES_DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      HERMES_GATEWAY_URL: http://ag-hermes:8642
+      # ★ 不要依赖这个值：hermes 会用 override=True 加载 /opt/data/.env，
+      #   其中的 API_SERVER_KEY 会覆盖容器环境变量（实测踩过，见 SPEC §11.8.1）。
+      #   控制层实际从挂载的 .env 文件读取生效值。
+      HERMES_API_KEY: ${API_SERVER_KEY}
+      HERMES_DOTENV_PATH: /opt/hermes-data/.env
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      SOFT_DELETE_RETENTION_DAYS: ${SOFT_DELETE_RETENTION_DAYS:-30}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 只读挂载 hermes 数据目录，用于读取实际生效的 API_SERVER_KEY
+      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/hermes-data:ro
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hermes:
+        condition: service_healthy
+    profiles:
+      - full          # 骨架阶段不启动，避免构建失败
+    networks:
+      - ag-net
+
+  # ───────────────────────────────────────────────────────────
+  # 前端（第 6 步填充）
+  # ───────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: ag-web
+    restart: unless-stopped
+    expose:
+      - "3000"
+    profiles:
+      - full
+    networks:
+      - ag-net
+
+  # ───────────────────────────────────────────────────────────
+  # 反向代理：唯一对外端口
+  # ───────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ag-nginx
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-10099}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - hermes
+    profiles:
+      - full
+    networks:
+      - ag-net
+
+networks:
+  ag-net:
+    driver: bridge
