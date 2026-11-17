@@ -4,14 +4,13 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
-import { getScope, getToken } from "@/lib/api";
+import { getRole, getToken } from "@/lib/api";
 
 /**
- * 首页：规格要求「首页改为管理中心」（SPEC §2.2）。
- *
- * - 已登录（admin） → /admin
- * - 已登录（user）  → /chat
- * - 未登录          → /login
+ * 首页跳转（v2 统一登录）：
+ * - admin → /admin
+ * - user  → /chat
+ * - 未登录 → /login
  */
 export default function HomePage() {
   const router = useRouter();
@@ -21,7 +20,7 @@ export default function HomePage() {
       router.replace("/login");
       return;
     }
-    router.replace(getScope() === "admin" ? "/admin" : "/chat");
+    router.replace(getRole() === "admin" ? "/admin" : "/chat");
   }, [router]);
 
   return (

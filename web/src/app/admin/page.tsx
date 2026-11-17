@@ -22,7 +22,6 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import TextField from "@mui/material/TextField";
-import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -126,7 +125,7 @@ function AdminAgents() {
                 <TableCell>名称</TableCell>
                 <TableCell>slug</TableCell>
                 <TableCell>状态</TableCell>
-                <TableCell>工具档位</TableCell>
+                <TableCell>禁用工具组</TableCell>
                 <TableCell>profile</TableCell>
                 <TableCell align="right">操作</TableCell>
               </TableRow>
@@ -155,7 +154,9 @@ function AdminAgents() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Chip size="small" variant="outlined" label={a.toolset_tier} />
+                    <Typography variant="caption">
+                      {a.disabled_toolsets.length ? a.disabled_toolsets.join(", ") : "（全开）"}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     <Typography variant="caption">{a.profile_name}</Typography>
@@ -210,7 +211,8 @@ function CreateAgentDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [soul, setSoul] = useState("");
-  const [tier, setTier] = useState("public");
+  // v2：disabled_toolsets 直接编辑；空数组 = 全放开（谨慎），缺省由后端给只读助手默认集
+  const [disabled, setDisabled] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   function reset() {
@@ -218,7 +220,7 @@ function CreateAgentDialog({
     setName("");
     setDescription("");
     setSoul("");
-    setTier("public");
+    setDisabled([]);
   }
 
   async function submit() {
@@ -229,7 +231,8 @@ function CreateAgentDialog({
         name: name.trim(),
         description: description.trim() || undefined,
         soul: soul.trim() || undefined,
-        toolset_tier: tier,
+        // 前端不传 = 后端给只读助手默认集；传空数组 = 明确全开
+        disabled_toolsets: disabled.length ? disabled : undefined,
       });
       reset();
       await onCreated();
@@ -274,11 +277,19 @@ function CreateAgentDialog({
             minRows={4}
             helperText="留空则用「你是「{名称}」」的默认模板"
           />
-          <TextField select label="工具档位" value={tier} onChange={(e) => setTier(e.target.value)}>
-            <MenuItem value="public">public —— 禁用 terminal/file/browser 等</MenuItem>
-            <MenuItem value="member">member —— 额外放开 memory</MenuItem>
-            <MenuItem value="admin">admin —— 全部放开（仅管理员自用）</MenuItem>
-          </TextField>
+          <TextField
+            label="禁用的工具组（逗号分隔，留空 = 只读助手默认集）"
+            value={disabled.join(", ")}
+            onChange={(e) =>
+              setDisabled(
+                e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              )
+            }
+            helperText="例如 terminal, browser。留空使用安全的默认集（禁 terminal/file/browser 等）。"
+          />
         </Stack>
       </DialogContent>
       <DialogActions>

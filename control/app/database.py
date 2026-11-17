@@ -13,6 +13,11 @@ engine = create_async_engine(_settings.database_url, echo=False, pool_pre_ping=T
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """返回全局 session 工厂（bootstrap 等不走请求依赖的地方用）。"""
+    return SessionLocal
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:
         yield session

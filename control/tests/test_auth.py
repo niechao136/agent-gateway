@@ -1,7 +1,4 @@
-"""用户体系测试：注册 / 登录 / scope 隔离。
-
-scope 隔离是 SPEC §3.5 的核心约束：管理员 token 不能当用户 token 用，反之亦然。
-"""
+"""用户体系测试：注册 / 登录 / role 隔离（v2 统一登录）。"""
 
 import pytest
 
@@ -91,24 +88,30 @@ async def test_me_with_garbage_token(client):
     assert r.status_code == 401
 
 
-async def test_admin_token_rejected_as_user(client):
-    """★ scope 隔离：admin scope 的 token 调 /me（需 user scope）必须 403。"""
+async def test_ghost_admin_token_rejected(client):
+    """token 里的用户必须真实存在（防伪造 claim）。"""
     from app.security import create_access_token
 
-    admin_tok = create_access_token("admin", "admin")
-    r = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {admin_tok}"})
-    assert r.status_code == 403
-    assert "用户身份" in r.json()["detail"]
+    tok = create_access_token("ghost-admin", "admin")
+    r = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 401
 
 
 async def test_user_token_rejected_as_admin(client):
-    """★ 反向隔离：user scope 的 token 不能通过 get_current_admin。"""
+    """★ role 隔离：role=user 的 token 不能通过 get_current_admin。"""
     from fastapi import Depends, FastAPI
     from httpx import ASGITransport, AsyncClient
 
+    from app.main import app
     from app.security import get_current_admin
 
     probe = FastAPI()
+    # 复用 conftest 挂到主 app 上的 session override，让 probe 也能查 users 表
+    from app.database import get_session as _gs
+
+    main_override = app.dependency_overrides.get(_gs)
+    if main_override is not None:
+        probe.dependency_overrides[_gs] = main_override
 
     @probe.get("/admin-only")
     async def admin_only(_: str = Depends(get_current_admin)):
@@ -125,9 +128,22 @@ async def test_user_token_rejected_as_admin(client):
 
 async def test_registration_can_be_disabled(client, monkeypatch):
     """ALLOW_REGISTRATION=false 时注册返回 403。"""
-    from app.routes import auth as auth_module
+    from app.config import get_settings
 
-    monkeypatch.setattr(auth_module._settings, "allow_registration", False)
+    monkeypatch.setattr(get_settings(), "allow_registration", False)
     r = await _register(client, username="carol")
     assert r.status_code == 403
     assert "未开放注册" in r.json()["detail"]
+
+
+# ── 引导管理员（SPEC-v2 决策 1）────────────────────────────
+# 引导逻辑的真实验证放在 test_users_admin.py::test_bootstrap_created_admin_can_login：
+# conftest 的 bootstrap_admin fixture 把 main.get_session_factory 重定向到测试库，
+# 然后调用 _bootstrap_admin()，再用配置的密码走 /api/auth/login 全链路验证。
+# 这里只补一个纯逻辑检查：JWT 里 role 不再参与 scope 判定。
+
+async def test_role_claim_does_not_gate_login_endpoints(client, user_token):
+    """role=user 的 token 访问 /me 正常（v2 无 scope 概念）。"""
+    r = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {user_token}"})
+    assert r.status_code == 200
+    assert r.json()["role"] == "user"

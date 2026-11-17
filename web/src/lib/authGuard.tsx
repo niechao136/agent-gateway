@@ -4,15 +4,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
-import { getScope, getToken, type Scope } from "@/lib/api";
+import { getRole, getToken, type Role } from "@/lib/api";
 
 /**
- * 登录守卫（SPEC §9）。
+ * 登录守卫（v2）。
  *
- * require: 需要的 scope；不传表示只要登录即可。
- * 返回 ready —— false 时调用方应渲染骨架，避免闪出未授权内容。
+ * require: 需要的 role；不传表示只要登录即可。
+ * v2 变化：管理页不再拒绝普通用户在客户端层面拦截——后端才是权威；
+ * 客户端守卫只做体验优化（无权限跳到该用户该去的地方）。
  */
-export function useRequireAuth(require?: Scope): { ready: boolean } {
+export function useRequireAuth(require?: Role): { ready: boolean } {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
@@ -22,10 +23,9 @@ export function useRequireAuth(require?: Scope): { ready: boolean } {
       router.replace("/login");
       return;
     }
-    const scope = getScope();
-    if (require && scope !== require) {
-      // 有登录但 scope 不符 → 去它该去的地方
-      router.replace(scope === "admin" ? "/admin" : "/chat");
+    const role = getRole();
+    if (require && role !== require) {
+      router.replace(role === "admin" ? "/admin" : "/chat");
       return;
     }
     setReady(true);
@@ -53,7 +53,7 @@ export function GuardedShell({
   require,
   children,
 }: {
-  require?: Scope;
+  require?: Role;
   children: React.ReactNode;
 }) {
   const { ready } = useRequireAuth(require);

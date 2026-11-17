@@ -1,30 +1,28 @@
-"""鉴权：密码哈希 + JWT（带 scope 隔离）+ FastAPI 依赖。
+"""鉴权：密码哈希 + JWT（role claim）+ FastAPI 依赖。
 
-关键设计（SPEC §3.5）：
-- JWT 用同一个签名密钥，但用 `scope` claim 区分 user / admin
-- get_current_user 必须显式拒绝 scope=admin 的 token，反之亦然
+v2 设计（SPEC-v2 决策 1）：
+- 单一 users 表，role 字段区分 user / admin，JWT payload 为 {sub, role, exp}
+- get_current_user 接受任意有效登录用户（admin 也算）
+- get_current_admin 要求 role == "admin"
 - bcrypt 只接受前 72 字节，必须显式截断（bcrypt 5.x 超长会抛错）
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated
 
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_settings
 from .database import get_session
-from .models import User
+from .models import User, UserRole
 
 _settings = get_settings()
 
 _BCRYPT_MAX_BYTES = 72
-
-Scope = Literal["user", "admin"]
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -46,9 +44,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 # ── JWT ───────────────────────────────────────────────────
-def create_access_token(subject: str, scope: Scope) -> str:
+def create_access_token(subject: str, role: str) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=_settings.jwt_expire_minutes)
-    payload = {"sub": subject, "scope": scope, "exp": expire}
+    payload = {"sub": subject, "role": role, "exp": expire}
     return jwt.encode(payload, _settings.jwt_secret, algorithm=_settings.jwt_algorithm)
 
 
@@ -77,20 +75,11 @@ def _extract(creds: HTTPAuthorizationCredentials | None) -> dict:
 
 
 # ── 依赖 ──────────────────────────────────────────────────
-async def get_current_user(
-    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> User:
-    """对话页用：只接受 scope=user 的 token。"""
-    payload = _extract(creds)
-    if payload.get("scope") != "user":
-        # 管理员 token 不能当用户 token 用（语义隔离）
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="需要用户身份"
-        )
+async def _load_user(session: AsyncSession, payload: dict) -> User:
     username = payload.get("sub")
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="凭证缺少主体")
+    from sqlalchemy import select
 
     user = (
         await session.execute(select(User).where(User.username == username))
@@ -100,17 +89,36 @@ async def get_current_user(
     return user
 
 
+async def get_current_user(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User:
+    """任意已登录用户（普通用户与管理员都能过）。"""
+    payload = _extract(creds)
+    return await _load_user(session, payload)
+
+
 async def get_current_admin(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-) -> str:
-    """管理中心用：只接受 scope=admin 的 token。"""
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User:
+    """管理操作用：要求 role == admin。"""
     payload = _extract(creds)
-    if payload.get("scope") != "admin":
+    user = await _load_user(session, payload)
+    if user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员身份"
         )
-    return payload.get("sub") or "admin"
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
-CurrentAdmin = Annotated[str, Depends(get_current_admin)]
+CurrentAdmin = Annotated[User, Depends(get_current_admin)]
+
+
+# ── 归属校验（SPEC-v2 决策 4）──────────────────────────────
+def can_modify(user: User, owner_id: int | None) -> bool:
+    """管理员全通过；普通用户只能操作自己拥有的资源。"""
+    if user.role == UserRole.ADMIN:
+        return True
+    return owner_id is not None and owner_id == user.id

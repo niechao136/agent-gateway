@@ -2,20 +2,20 @@
  * 控制层 API 客户端。
  *
  * 鉴权：Bearer JWT，存 localStorage。
- * scope 由后端校验：user token 只能访问 /api/chat/*，admin token 访问 /api/admin/*。
+ * v2：单一用户体系，token 带 role claim；写操作由后端按归属（owner_id）校验。
  */
 
 const TOKEN_KEY = "ag_token";
-const SCOPE_KEY = "ag_scope";
 const USER_KEY = "ag_user";
 
-export type Scope = "user" | "admin";
+export type Role = "user" | "admin";
 
 export interface UserInfo {
   id: number;
   username: string;
   email: string | null;
   display_name: string | null;
+  role: Role;
 }
 
 export interface TokenResponse {
@@ -30,8 +30,8 @@ export interface Agent {
   name: string;
   description: string | null;
   profile_name: string;
+  owner_id: number;
   status: "draft" | "published";
-  toolset_tier: "public" | "member" | "admin";
   disabled_toolsets: string[];
   gateway_running?: boolean | null;
   profile_exists?: boolean | null;
@@ -57,9 +57,9 @@ export function hasToken(): boolean {
   return !!getToken();
 }
 
-export function getScope(): Scope | null {
-  if (typeof window === "undefined") return null;
-  return (localStorage.getItem(SCOPE_KEY) as Scope | null) ?? null;
+export function getRole(): Role | null {
+  const u = getStoredUser();
+  return (u?.role as Role | undefined) ?? null;
 }
 
 export function getStoredUser(): UserInfo | null {
@@ -73,15 +73,13 @@ export function getStoredUser(): UserInfo | null {
   }
 }
 
-export function saveSession(token: string, user: UserInfo, scope: Scope): void {
+export function saveSession(token: string, user: UserInfo): void {
   localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(SCOPE_KEY, scope);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(SCOPE_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
@@ -143,7 +141,7 @@ export async function register(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
-  saveSession(r.access_token, r.user, "user");
+  saveSession(r.access_token, r.user);
   return r;
 }
 
@@ -152,25 +150,7 @@ export async function login(username: string, password: string): Promise<TokenRe
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  saveSession(r.access_token, r.user, "user");
-  return r;
-}
-
-/** 管理员登录：scope=admin，进入管理中心。 */
-export async function adminLogin(
-  username: string,
-  password: string,
-): Promise<{ access_token: string }> {
-  const r = await request<{ access_token: string; scope: string }>("/auth/admin-login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  // 管理员没有 users 表记录，用一个占位 user 对象存 scope
-  saveSession(
-    r.access_token,
-    { id: 0, username, email: null, display_name: "管理员" },
-    "admin",
-  );
+  saveSession(r.access_token, r.user);
   return r;
 }
 
@@ -188,7 +168,7 @@ export async function listVisibleAgents(): Promise<Agent[]> {
 }
 
 export async function listAllAgents(): Promise<Agent[]> {
-  return request<Agent[]>("/admin/agents");
+  return request<Agent[]>("/agents");
 }
 
 export async function createAgent(body: {
@@ -198,30 +178,30 @@ export async function createAgent(body: {
   soul?: string;
   model?: string;
   provider?: string;
-  toolset_tier?: string;
+  disabled_toolsets?: string[];
   status?: string;
 }): Promise<Agent> {
-  return request<Agent>("/admin/agents", { method: "POST", body: JSON.stringify(body) });
+  return request<Agent>("/agents", { method: "POST", body: JSON.stringify(body) });
 }
 
 export async function updateAgent(id: number, body: Record<string, unknown>): Promise<Agent> {
-  return request<Agent>(`/admin/agents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  return request<Agent>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 export async function deleteAgent(id: number): Promise<void> {
-  return request<void>(`/admin/agents/${id}`, { method: "DELETE" });
+  return request<void>(`/agents/${id}`, { method: "DELETE" });
 }
 
 export async function publishAgent(id: number): Promise<Agent> {
-  return request<Agent>(`/admin/agents/${id}/publish`, { method: "POST" });
+  return request<Agent>(`/agents/${id}/publish`, { method: "POST" });
 }
 
 export async function unpublishAgent(id: number): Promise<Agent> {
-  return request<Agent>(`/admin/agents/${id}/unpublish`, { method: "POST" });
+  return request<Agent>(`/agents/${id}/unpublish`, { method: "POST" });
 }
 
 export async function getAgent(id: number): Promise<Agent> {
-  return request<Agent>(`/admin/agents/${id}`);
+  return request<Agent>(`/agents/${id}`);
 }
 
 // ── 用户管理 ──────────────────────────────────────────────
@@ -230,6 +210,7 @@ export interface AdminUser {
   username: string;
   email: string | null;
   display_name: string | null;
+  role: Role;
   disabled: boolean;
   created_at: string | null;
   last_login_at: string | null;
@@ -242,7 +223,7 @@ export async function listUsers(): Promise<AdminUser[]> {
 
 export async function updateUser(
   id: number,
-  body: { disabled?: boolean; display_name?: string },
+  body: { disabled?: boolean; display_name?: string; role?: Role },
 ): Promise<AdminUser> {
   return request<AdminUser>(`/admin/users/${id}`, {
     method: "PATCH",
@@ -261,7 +242,7 @@ export interface AgentSkill {
 }
 
 export async function listAgentSkills(agentId: number): Promise<AgentSkill[]> {
-  return request<AgentSkill[]>(`/admin/agents/${agentId}/skills`);
+  return request<AgentSkill[]>(`/agents/${agentId}/skills`);
 }
 
 export async function toggleAgentSkill(
@@ -269,7 +250,7 @@ export async function toggleAgentSkill(
   name: string,
   enabled: boolean,
 ): Promise<AgentSkill> {
-  return request<AgentSkill>(`/admin/agents/${agentId}/skills/toggle`, {
+  return request<AgentSkill>(`/agents/${agentId}/skills/toggle`, {
     method: "POST",
     body: JSON.stringify({ name, enabled }),
   });
@@ -286,21 +267,21 @@ export interface A2AEndpoint {
 }
 
 export async function listA2AEndpoints(agentId: number): Promise<A2AEndpoint[]> {
-  return request<A2AEndpoint[]>(`/admin/agents/${agentId}/a2a`);
+  return request<A2AEndpoint[]>(`/agents/${agentId}/a2a`);
 }
 
 export async function createA2AEndpoint(
   agentId: number,
   body: { name: string; url: string; capabilities: string[]; timeout: number },
 ): Promise<{ endpoint: A2AEndpoint; apply_error: string | null }> {
-  return request(`/admin/agents/${agentId}/a2a`, {
+  return request(`/agents/${agentId}/a2a`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteA2AEndpoint(agentId: number, endpointId: number): Promise<void> {
-  return request<void>(`/admin/agents/${agentId}/a2a/${endpointId}`, { method: "DELETE" });
+  return request<void>(`/agents/${agentId}/a2a/${endpointId}`, { method: "DELETE" });
 }
 
 // ── MCP 服务器 ────────────────────────────────────────────
@@ -318,7 +299,7 @@ export interface MCPServer {
 }
 
 export async function listMCP(agentId: number): Promise<{ profile: string; servers: MCPServer[] }> {
-  return request(`/admin/agents/${agentId}/mcp`);
+  return request(`/agents/${agentId}/mcp`);
 }
 
 export async function addMCP(
@@ -332,20 +313,20 @@ export async function addMCP(
     enabled?: boolean;
   },
 ): Promise<MCPServer> {
-  return request(`/admin/agents/${agentId}/mcp`, {
+  return request(`/agents/${agentId}/mcp`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteMCP(agentId: number, name: string): Promise<void> {
-  return request<void>(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}`, {
+  return request<void>(`/agents/${agentId}/mcp/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
 }
 
 export async function testMCP(agentId: number, name: string): Promise<Record<string, unknown>> {
-  return request(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}/test`, {
+  return request(`/agents/${agentId}/mcp/${encodeURIComponent(name)}/test`, {
     method: "POST",
   });
 }
@@ -355,7 +336,7 @@ export async function toggleMCP(
   name: string,
   enabled: boolean,
 ): Promise<unknown> {
-  return request(`/admin/agents/${agentId}/mcp/${encodeURIComponent(name)}/enabled`, {
+  return request(`/agents/${agentId}/mcp/${encodeURIComponent(name)}/enabled`, {
     method: "PUT",
     body: JSON.stringify({ enabled }),
   });
@@ -374,7 +355,7 @@ export interface ModelTemplate {
 }
 
 export async function listModelTemplates(): Promise<ModelTemplate[]> {
-  return request<ModelTemplate[]>("/admin/models");
+  return request<ModelTemplate[]>("/models");
 }
 
 export async function createModelTemplate(body: {
@@ -385,21 +366,21 @@ export async function createModelTemplate(body: {
   api_key?: string;
   description?: string;
 }): Promise<ModelTemplate> {
-  return request<ModelTemplate>("/admin/models", {
+  return request<ModelTemplate>("/models", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export async function deleteModelTemplate(id: number): Promise<void> {
-  return request<void>(`/admin/models/${id}`, { method: "DELETE" });
+  return request<void>(`/models/${id}`, { method: "DELETE" });
 }
 
 export async function applyModelTemplate(
   agentId: number,
   templateId: number,
 ): Promise<{ applied: boolean; model: string }> {
-  return request(`/admin/agents/${agentId}/apply-model/${templateId}`, {
+  return request(`/agents/${agentId}/apply-model/${templateId}`, {
     method: "POST",
   });
 }
@@ -407,7 +388,7 @@ export async function applyModelTemplate(
 export async function getEffectiveModel(
   agentId: number,
 ): Promise<{ profile: string; model: Record<string, unknown> }> {
-  return request(`/admin/agents/${agentId}/effective-model`);
+  return request(`/agents/${agentId}/effective-model`);
 }
 
 // ── 会话 ──────────────────────────────────────────────────

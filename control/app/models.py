@@ -10,6 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -19,7 +20,6 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -32,10 +32,9 @@ class AgentStatus(StrEnum):
     PUBLISHED = "published"
 
 
-class ToolsetTier(StrEnum):
-    PUBLIC = "public"      # 普通注册用户：无 terminal/file/browser
-    MEMBER = "member"      # 信任用户：额外放开 memory/session_search
-    ADMIN = "admin"        # 管理员测试：全开
+class UserRole(StrEnum):
+    USER = "user"
+    ADMIN = "admin"
 
 
 class User(Base):
@@ -46,6 +45,10 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # v2：单一用户体系，role 区分普通用户与管理员（SPEC-v2 决策 1）
+    role: Mapped[str] = mapped_column(
+        String(16), default=UserRole.USER, server_default=UserRole.USER
+    )
     disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -67,13 +70,17 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # hermes profile 名（与 slug 解耦，允许改名而不动 profile 目录）
+    # v2 命名：agent-u{owner_id}-{slug}（SPEC-v2 决策 3）
     profile_name: Mapped[str] = mapped_column(String(64), unique=True)
+    # v2：归属（SPEC-v2 决策 2）。管理员代建时也记 admin 自己。
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     status: Mapped[str] = mapped_column(
         String(16), default=AgentStatus.DRAFT, server_default=AgentStatus.DRAFT
     )
-    toolset_tier: Mapped[str] = mapped_column(
-        String(16), default=ToolsetTier.PUBLIC, server_default=ToolsetTier.PUBLIC
-    )
+    # v2：toolset_tier 删除，直接存禁用列表（默认 = 只读助手）
+    disabled_toolsets: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -97,6 +104,13 @@ class ModelTemplate(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # 批次 2：共享后所有用户可见（只读），仅 owner/admin 可改删
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     provider: Mapped[str] = mapped_column(String(64), default="custom")
     model: Mapped[str] = mapped_column(String(128))
     base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -104,6 +118,174 @@ class ModelTemplate(Base):
     api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ── 批次 2：MCP 独立表 ────────────────────────────────────
+class MCPServer(Base):
+    """MCP 服务器资源：控制层唯一真相，绑定后同步写入 profile config.yaml。
+
+    五方式鉴权（SPEC-v2）：none/bearer/header/query/basic，
+    HTTP 面生成 headers/query，stdio 面生成子进程 env（见 hermes/auth_scheme.py）。
+    """
+
+    __tablename__ = "mcp_servers"
+    __table_args__ = (
+        Index("ix_mcp_servers_owner_name", "owner_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # stdio | sse | http | streamable_http
+    transport: Mapped[str] = mapped_column(String(24), default="stdio")
+    # stdio
+    command: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    args: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    env: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # http 系
+    url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # 五方式鉴权
+    auth_type: Mapped[str] = mapped_column(String(16), default="none")
+    token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    auth_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # 共享后所有用户可绑定（只读），仅 owner/admin 可改删
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AgentMCPServer(Base):
+    """Agent ↔ MCP 服务器绑定。"""
+
+    __tablename__ = "agent_mcp_servers"
+    __table_args__ = (
+        Index("ix_agent_mcp_pair", "agent_id", "mcp_server_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    mcp_server_id: Mapped[int] = mapped_column(
+        ForeignKey("mcp_servers.id", ondelete="CASCADE"), index=True
+    )
+
+
+class A2AOutboundEndpoint(Base):
+    """A2A 出站端点资源（独立表，绑定到多个 Agent）。"""
+
+    __tablename__ = "a2a_outbound_endpoints"
+    __table_args__ = (
+        Index("ix_a2a_out_owner_name", "owner_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str] = mapped_column(String(512))
+    capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    timeout: Mapped[int] = mapped_column(Integer, default=120)
+
+    # 五方式鉴权
+    auth_type: Mapped[str] = mapped_column(String(16), default="none")
+    token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    auth_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AgentA2AEndpoint(Base):
+    """Agent ↔ A2A 出站端点绑定。"""
+
+    __tablename__ = "agent_a2a_endpoints"
+    __table_args__ = (
+        Index("ix_agent_a2a_pair", "agent_id", "endpoint_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    endpoint_id: Mapped[int] = mapped_column(
+        ForeignKey("a2a_outbound_endpoints.id", ondelete="CASCADE"), index=True
+    )
+
+
+# ── 批次 2：Skill 双来源 ──────────────────────────────────
+class CustomSkill(Base):
+    """自定义 Skill：控制层存正文，绑定后同步写入 profile 的 skills/ 目录。"""
+
+    __tablename__ = "custom_skills"
+    __table_args__ = (
+        Index("ix_custom_skills_owner_name", "owner_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SKILL.md 正文
+    content: Mapped[str] = mapped_column(Text)
+    # 附加文件 {filename: content}
+    files: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AgentCustomSkill(Base):
+    """Agent ↔ 自定义 Skill 绑定。"""
+
+    __tablename__ = "agent_custom_skills"
+    __table_args__ = (
+        Index("ix_agent_skill_pair", "agent_id", "skill_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    skill_id: Mapped[int] = mapped_column(
+        ForeignKey("custom_skills.id", ondelete="CASCADE"), index=True
+    )
+
+
+class BuiltinSkillState(Base):
+    """内置 Skill 的控制层启停状态（级联禁用的决策记录）。"""
+
+    __tablename__ = "builtin_skill_states"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

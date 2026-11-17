@@ -104,7 +104,6 @@ export async function streamChat(
 
   if (res.status === 401) {
     localStorage.removeItem("ag_token");
-    localStorage.removeItem("ag_scope");
     localStorage.removeItem("ag_user");
     location.href = "/login";
     return;

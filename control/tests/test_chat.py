@@ -50,15 +50,13 @@ async def _user(client, name="alice"):
     return r.json()["access_token"]
 
 
-async def _pub_agent(client):
-    from app.security import create_access_token
-
-    atok = create_access_token("admin", "admin")
+async def _pub_agent(client, atok):
     await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": "bot1", "name": "Bot1"}
+        "/api/agents", headers=_h(atok), json={"slug": "bot1", "name": "Bot1"}
     )
-    aid = (await client.get("/api/admin/agents", headers=_h(atok))).json()[0]["id"]
-    await client.post(f"/api/admin/agents/{aid}/publish", headers=_h(atok))
+    agents = (await client.get("/api/agents", headers=_h(atok))).json()
+    aid = next(a["id"] for a in agents if a["slug"] == "bot1")
+    await client.post(f"/api/agents/{aid}/publish", headers=_h(atok))
     return "bot1"
 
 
@@ -196,9 +194,9 @@ async def test_translate_empty_stream_is_error():
 
 
 # ── 会话归属（安全核心）──────────────────────────────────
-async def test_create_conversation(client):
+async def test_create_conversation(client, atok):
     tok = await _user(client)
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
     r = await client.post(
         "/api/chat/conversations",
         headers=_h(tok),
@@ -218,11 +216,11 @@ async def test_conversation_requires_published_agent(client):
     assert r.status_code == 404
 
 
-async def test_user_cannot_see_others_conversations(client):
+async def test_user_cannot_see_others_conversations(client, atok):
     """★ 用户 B 的列表里不能出现 用户 A 的会话。"""
     a = await _user(client, "alice")
     b = await _user(client, "bob")
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
 
     await client.post(
         "/api/chat/conversations", headers=_h(a), json={"agent_slug": "bot1"}
@@ -231,11 +229,11 @@ async def test_user_cannot_see_others_conversations(client):
     assert (await client.get("/api/chat/conversations", headers=_h(b))).json() == []
 
 
-async def test_user_cannot_access_others_conversation_by_id(client):
+async def test_user_cannot_access_others_conversation_by_id(client, atok):
     """★ 猜 id 直接访问别人的会话必须 404（所有端点）。"""
     a = await _user(client, "alice")
     b = await _user(client, "bob")
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
 
     cid = (
         await client.post(
@@ -259,10 +257,10 @@ async def test_user_cannot_access_others_conversation_by_id(client):
     ).status_code == 200
 
 
-async def test_soft_delete_hides_but_keeps_hermes_session(client):
+async def test_soft_delete_hides_but_keeps_hermes_session(client, atok):
     """★ 软删：列表消失，但 hermes 侧 session 仍在、未被调用删除。"""
     tok = await _user(client)
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
     conv = (
         await client.post(
             "/api/chat/conversations", headers=_h(tok), json={"agent_slug": "bot1"}
@@ -278,9 +276,9 @@ async def test_soft_delete_hides_but_keeps_hermes_session(client):
     assert not any(c == ("delete", sid) for c in _gw().calls)
 
 
-async def test_restore_conversation(client):
+async def test_restore_conversation(client, atok):
     tok = await _user(client)
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
     conv = (
         await client.post(
             "/api/chat/conversations", headers=_h(tok), json={"agent_slug": "bot1"}
@@ -297,9 +295,9 @@ async def test_restore_conversation(client):
     )
 
 
-async def test_stream_endpoint_returns_sse(client):
+async def test_stream_endpoint_returns_sse(client, atok):
     tok = await _user(client)
-    await _pub_agent(client)
+    await _pub_agent(client, atok)
     conv = (
         await client.post(
             "/api/chat/conversations", headers=_h(tok), json={"agent_slug": "bot1"}

@@ -10,7 +10,6 @@ import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import MenuItem from "@mui/material/MenuItem";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -43,7 +42,7 @@ function EditAgent() {
   const [description, setDescription] = useState("");
   const [soul, setSoul] = useState("");
   const [model, setModel] = useState("");
-  const [tier, setTier] = useState("public");
+  const [disabled, setDisabled] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,7 +53,7 @@ function EditAgent() {
         setAgent(a);
         setName(a.name);
         setDescription(a.description ?? "");
-        setTier(a.toolset_tier);
+        setDisabled(a.disabled_toolsets ?? []);
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : "加载失败"));
   }, [id]);
@@ -67,7 +66,7 @@ function EditAgent() {
       await updateAgent(id, {
         name: name.trim(),
         description: description.trim(),
-        toolset_tier: tier,
+        disabled_toolsets: disabled,
         ...(soul.trim() ? { soul: soul.trim() } : {}),
         ...(model.trim() ? { model: model.trim() } : {}),
       });
@@ -166,18 +165,18 @@ function EditAgent() {
               helperText="例如 gemini-2.5-flash。留空则保持原样。"
             />
             <TextField
-              select
-              label="工具档位"
-              value={tier}
-              onChange={(e) => setTier(e.target.value)}
-              helperText={`当前禁用：${
-                agent?.disabled_toolsets.length ? agent.disabled_toolsets.join(", ") : "无"
-              }`}
-            >
-              <MenuItem value="public">public — 无 terminal/file/browser</MenuItem>
-              <MenuItem value="member">member — 额外放开 memory</MenuItem>
-              <MenuItem value="admin">admin — 全部放开（仅管理员自用）</MenuItem>
-            </TextField>
+              label="禁用的工具组（逗号分隔）"
+              value={disabled.join(", ")}
+              onChange={(e) =>
+                setDisabled(
+                  e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                )
+              }
+              helperText="例如 terminal, browser。清空 = 全部放开（谨慎）。hermes 内置工具只能按组开关。"
+            />
 
             <Box sx={{ display: "flex", gap: 1 }}>
               <Button variant="contained" onClick={() => void save()} disabled={busy}>

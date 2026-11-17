@@ -1,4 +1,4 @@
-"""管理员：Agent 的 A2A 端点配置。"""
+"""Agent 的 A2A 端点配置（登录即可，写操作校验归属）。"""
 
 from __future__ import annotations
 
@@ -19,12 +19,12 @@ from ..hermes.a2a import (
     validate_endpoint,
 )
 from ..models import A2AEndpoint, Agent
-from ..security import CurrentAdmin
+from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
 
-router = APIRouter(prefix="/api/admin/agents", tags=["admin:a2a"])
+router = APIRouter(prefix="/api/agents", tags=["agent-a2a"])
 
 
 class EndpointIn(BaseModel):
@@ -65,12 +65,14 @@ def _out(e: A2AEndpoint) -> EndpointOut:
     )
 
 
-async def _agent_or_404(session: AsyncSession, agent_id: int) -> Agent:
+async def _agent_or_404(session: AsyncSession, agent_id: int, user) -> Agent:
     agent = (
         await session.execute(select(Agent).where(Agent.id == agent_id))
     ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
     return agent
 
 
@@ -108,10 +110,10 @@ async def _apply(agent: Agent, session: AsyncSession) -> str | None:
 @router.get("/{agent_id}/a2a", response_model=list[EndpointOut])
 async def list_endpoints(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[EndpointOut]:
-    await _agent_or_404(session, agent_id)
+    await _agent_or_404(session, agent_id, user)
     rows = (
         await session.execute(
             select(A2AEndpoint)
@@ -126,10 +128,10 @@ async def list_endpoints(
 async def create_endpoint(
     agent_id: int,
     body: EndpointIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     try:
         validate_endpoint(body.name, body.url)
     except A2AError as exc:
@@ -166,10 +168,10 @@ async def update_endpoint(
     agent_id: int,
     endpoint_id: int,
     body: EndpointUpdateIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     ep = (
         await session.execute(
             select(A2AEndpoint).where(
@@ -207,10 +209,10 @@ async def update_endpoint(
 async def delete_endpoint(
     agent_id: int,
     endpoint_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     ep = (
         await session.execute(
             select(A2AEndpoint).where(
@@ -229,10 +231,10 @@ async def delete_endpoint(
 @router.get("/{agent_id}/a2a/effective")
 async def get_effective(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     """读取 profile 里**实际生效**的 a2a_agents（排查配置漂移用）。"""
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     effective = read_a2a_section(agent.profile_name, _settings.hermes_data_root)
     return {"profile": agent.profile_name, "a2a_agents": effective}

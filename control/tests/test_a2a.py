@@ -22,11 +22,6 @@ def _h(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def _admin_token():
-    from app.security import create_access_token
-
-    return create_access_token("admin", "admin")
-
 
 # ── 校验（纯函数）──────────────────────────────────────────
 def test_validate_ok():
@@ -111,26 +106,25 @@ def test_read_missing_section(tmp_path):
 
 
 # ── HTTP 接口 ────────────────────────────────────────────
-async def _make_agent(client, slug="b1") -> int:
-    atok = _admin_token()
+async def _make_agent(client, atok, slug="b1") -> int:
     await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": slug, "name": slug}
+        "/api/agents", headers=_h(atok), json={"slug": slug, "name": slug}
     )
-    agents = (await client.get("/api/admin/agents", headers=_h(atok))).json()
+    agents = (await client.get("/api/agents", headers=_h(atok))).json()
     return next(a["id"] for a in agents if a["slug"] == slug)
 
 
-async def test_create_endpoint(client, monkeypatch):
+async def test_create_endpoint(client, atok, monkeypatch):
     from app.routes import agent_a2a as route
 
     calls = {}
     monkeypatch.setattr(
         route, "apply_a2a_endpoints", lambda *a, **kw: calls.setdefault("ok", True) or {}
     )
-    aid = await _make_agent(client)
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/a2a",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/a2a",
+        headers=_h(atok),
         json={"name": "r1", "url": "http://a.com", "capabilities": ["web"]},
     )
     assert r.status_code == 201
@@ -138,28 +132,28 @@ async def test_create_endpoint(client, monkeypatch):
     assert r.json()["apply_error"] is None
 
 
-async def test_create_duplicate_name_409(client, monkeypatch):
+async def test_create_duplicate_name_409(client, atok, monkeypatch):
     from app.routes import agent_a2a as route
 
     monkeypatch.setattr(route, "apply_a2a_endpoints", lambda *a, **kw: {})
-    aid = await _make_agent(client)
+    aid = await _make_agent(client, atok)
     body = {"name": "dup", "url": "http://a.com"}
-    h = _h(_admin_token())
-    assert (await client.post(f"/api/admin/agents/{aid}/a2a", headers=h, json=body)).status_code == 201
-    assert (await client.post(f"/api/admin/agents/{aid}/a2a", headers=h, json=body)).status_code == 409
+    h = _h(atok)
+    assert (await client.post(f"/api/agents/{aid}/a2a", headers=h, json=body)).status_code == 201
+    assert (await client.post(f"/api/agents/{aid}/a2a", headers=h, json=body)).status_code == 409
 
 
-async def test_create_invalid_url_422(client):
-    aid = await _make_agent(client)
+async def test_create_invalid_url_422(client, atok):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/a2a",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/a2a",
+        headers=_h(atok),
         json={"name": "bad", "url": "ftp://x"},
     )
     assert r.status_code == 422
 
 
-async def test_apply_error_is_reported_not_raised(client, monkeypatch):
+async def test_apply_error_is_reported_not_raised(client, atok, monkeypatch):
     """写入 config 失败时，DB 仍保存，接口返回 apply_error。"""
     from app.hermes.a2a import A2AError
     from app.routes import agent_a2a as route
@@ -168,42 +162,34 @@ async def test_apply_error_is_reported_not_raised(client, monkeypatch):
         raise A2AError("文件不存在")
 
     monkeypatch.setattr(route, "apply_a2a_endpoints", boom)
-    aid = await _make_agent(client)
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/a2a",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/a2a",
+        headers=_h(atok),
         json={"name": "x1", "url": "http://a.com"},
     )
     assert r.status_code == 201
     assert r.json()["apply_error"] == "文件不存在"
     # 记录仍然存在
-    lst = await client.get(f"/api/admin/agents/{aid}/a2a", headers=_h(_admin_token()))
+    lst = await client.get(f"/api/agents/{aid}/a2a", headers=_h(atok))
     assert len(lst.json()) == 1
 
 
-async def test_delete_endpoint(client, monkeypatch):
+async def test_delete_endpoint(client, atok, monkeypatch):
     from app.routes import agent_a2a as route
 
     monkeypatch.setattr(route, "apply_a2a_endpoints", lambda *a, **kw: {})
-    aid = await _make_agent(client)
-    h = _h(_admin_token())
+    aid = await _make_agent(client, atok)
+    h = _h(atok)
     eid = (
         await client.post(
-            f"/api/admin/agents/{aid}/a2a", headers=h, json={"name": "d1", "url": "http://a.com"}
+            f"/api/agents/{aid}/a2a", headers=h, json={"name": "d1", "url": "http://a.com"}
         )
     ).json()["endpoint"]["id"]
 
-    assert (await client.delete(f"/api/admin/agents/{aid}/a2a/{eid}", headers=h)).status_code == 204
-    assert (await client.get(f"/api/admin/agents/{aid}/a2a", headers=h)).json() == []
+    assert (await client.delete(f"/api/agents/{aid}/a2a/{eid}", headers=h)).status_code == 204
+    assert (await client.get(f"/api/agents/{aid}/a2a", headers=h)).json() == []
 
 
-async def test_a2a_requires_admin(client):
-    utok = (
-        await client.post(
-            "/api/auth/register", json={"username": "user2", "password": "password123"}
-        )
-    ).json()["access_token"]
-    aid = await _make_agent(client)
-    assert (
-        await client.get(f"/api/admin/agents/{aid}/a2a", headers=_h(utok))
-    ).status_code == 403
+async def test_a2a_requires_login(client):
+    assert (await client.get("/api/agents/1/a2a")).status_code == 401

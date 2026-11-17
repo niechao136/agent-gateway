@@ -16,8 +16,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 天
 
-    # ── 默认管理员（来自 .env）──
-    # 因为不需要单独的管理员表，管理中心账号由环境变量提供。
+    # ── 引导管理员（SPEC-v2 决策 1）──
+    # 启动时若 users 表无任何 admin：
+    #   - 该用户名已存在（role=user）→ 提权为 admin
+    #   - 否则创建新账号
     # 生产环境务必改掉默认密码。
     admin_username: str = "admin"
     admin_password: str = "admin12345"

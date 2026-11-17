@@ -13,12 +13,6 @@ def _h(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def _admin_token():
-    from app.security import create_access_token
-
-    return create_access_token("admin", "admin")
-
-
 # ── 文件写入（真实文件）────────────────────────────────────
 def _make_profile(root, name="p1"):
     p = profile_config_path(name, str(root))
@@ -71,31 +65,42 @@ def test_apply_model_missing_profile(tmp_path):
 
 
 # ── HTTP 接口 ────────────────────────────────────────────
-async def _make_agent(client, slug="mm1") -> int:
-    atok = _admin_token()
-    await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": slug, "name": slug}
+async def _user_token(client, name="mmuser"):
+    """注册并返回 token；重名则回退登录（同一 client 内幂等）。"""
+    r = await client.post(
+        "/api/auth/register", json={"username": name, "password": "password123"}
     )
-    agents = (await client.get("/api/admin/agents", headers=_h(atok))).json()
-    return next(a["id"] for a in agents if a["slug"] == slug)
+    if r.status_code == 201:
+        return r.json()["access_token"]
+    r = await client.post("/api/auth/login", json={"username": name, "password": "password123"})
+    return r.json()["access_token"]
+
+
+async def _make_agent(client, slug="mm1", tok=None) -> int:
+    tok = tok or await _user_token(client)
+    r = await client.post("/api/agents", headers=_h(tok), json={"slug": slug, "name": slug})
+    return r.json()["id"]
 
 
 async def test_create_template(client):
+    tok = await _user_token(client)
     r = await client.post(
-        "/api/admin/models",
-        headers=_h(_admin_token()),
+        "/api/models",
+        headers=_h(tok),
         json={"name": "t1", "model": "gemini-2.5-flash", "provider": "custom"},
     )
     assert r.status_code == 201
     b = r.json()
     assert b["name"] == "t1"
     assert b["has_api_key"] is False
+    assert b["owner_id"] == 1
 
 
 async def test_create_with_key_hides_value(client):
+    tok = await _user_token(client)
     r = await client.post(
-        "/api/admin/models",
-        headers=_h(_admin_token()),
+        "/api/models",
+        headers=_h(tok),
         json={"name": "t2", "model": "m", "api_key": "supersecret"},
     )
     assert r.json()["has_api_key"] is True
@@ -103,30 +108,56 @@ async def test_create_with_key_hides_value(client):
     assert "supersecret" not in r.text
 
 
+async def test_template_isolated_by_owner(client):
+    """v2：模板归属隔离——A 的模板 B 看不到也改不了。"""
+    t1 = await _user_token(client, "tpl-a")
+    t2 = await _user_token(client, "tpl-b")
+    tid = (
+        await client.post("/api/models", headers=_h(t1), json={"name": "mine", "model": "m"})
+    ).json()["id"]
+
+    assert (await client.get("/api/models", headers=_h(t2))).json() == []
+    assert (
+        await client.patch(
+            f"/api/models/{tid}", headers=_h(t2), json={"model": "hacked"}
+        )
+    ).status_code == 403
+    assert (await client.delete(f"/api/models/{tid}", headers=_h(t2))).status_code == 403
+    assert (await client.get("/api/models", headers=_h(t1))).json() != []
+
+
+async def test_admin_sees_all_templates(client, atok):
+    t1 = await _user_token(client, "tpl-c")
+    await client.post("/api/models", headers=_h(t1), json={"name": "c1", "model": "m"})
+    r = await client.get("/api/models", headers=_h(atok))
+    assert r.status_code == 200
+    assert [t["name"] for t in r.json()] == ["c1"]
+
+
 async def test_duplicate_template_409(client):
-    h = _h(_admin_token())
+    tok = await _user_token(client)
     body = {"name": "dup", "model": "m"}
-    assert (await client.post("/api/admin/models", headers=h, json=body)).status_code == 201
-    assert (await client.post("/api/admin/models", headers=h, json=body)).status_code == 409
+    assert (await client.post("/api/models", headers=_h(tok), json=body)).status_code == 201
+    assert (await client.post("/api/models", headers=_h(tok), json=body)).status_code == 409
 
 
 async def test_list_and_delete(client):
-    h = _h(_admin_token())
+    tok = await _user_token(client)
     tid = (
-        await client.post("/api/admin/models", headers=h, json={"name": "x", "model": "m"})
+        await client.post("/api/models", headers=_h(tok), json={"name": "x", "model": "m"})
     ).json()["id"]
-    assert len((await client.get("/api/admin/models", headers=h)).json()) == 1
-    assert (await client.delete(f"/api/admin/models/{tid}", headers=h)).status_code == 204
-    assert (await client.get("/api/admin/models", headers=h)).json() == []
+    assert len((await client.get("/api/models", headers=_h(tok))).json()) == 1
+    assert (await client.delete(f"/api/models/{tid}", headers=_h(tok))).status_code == 204
+    assert (await client.get("/api/models", headers=_h(tok))).json() == []
 
 
 async def test_update_template(client):
-    h = _h(_admin_token())
+    tok = await _user_token(client)
     tid = (
-        await client.post("/api/admin/models", headers=h, json={"name": "u", "model": "m1"})
+        await client.post("/api/models", headers=_h(tok), json={"name": "u", "model": "m1"})
     ).json()["id"]
     r = await client.patch(
-        f"/api/admin/models/{tid}", headers=h, json={"model": "m2", "provider": "openai"}
+        f"/api/models/{tid}", headers=_h(tok), json={"model": "m2", "provider": "openai"}
     )
     assert r.json()["model"] == "m2"
     assert r.json()["provider"] == "openai"
@@ -136,34 +167,29 @@ async def test_apply_to_agent(client, monkeypatch):
     from app.routes import models as route
 
     monkeypatch.setattr(route, "apply_model", lambda *a, **kw: {"path": "/x"})
-    h = _h(_admin_token())
+    tok = await _user_token(client)
     tid = (
         await client.post(
-            "/api/admin/models",
-            headers=h,
+            "/api/models",
+            headers=_h(tok),
             json={"name": "ap", "model": "gemini-2.5-flash", "provider": "custom"},
         )
     ).json()["id"]
-    aid = await _make_agent(client)
+    aid = await _make_agent(client, slug="apply1", tok=tok)
 
-    r = await client.post(f"/api/admin/agents/{aid}/apply-model/{tid}", headers=h)
+    r = await client.post(f"/api/agents/{aid}/apply-model/{tid}", headers=_h(tok))
     assert r.status_code == 200
     assert r.json()["applied"] is True
 
 
 async def test_apply_unknown_agent_404(client):
-    h = _h(_admin_token())
+    tok = await _user_token(client)
     tid = (
-        await client.post("/api/admin/models", headers=h, json={"name": "z", "model": "m"})
+        await client.post("/api/models", headers=_h(tok), json={"name": "z", "model": "m"})
     ).json()["id"]
-    r = await client.post(f"/api/admin/agents/9999/apply-model/{tid}", headers=h)
+    r = await client.post(f"/api/agents/9999/apply-model/{tid}", headers=_h(tok))
     assert r.status_code == 404
 
 
-async def test_models_requires_admin(client):
-    utok = (
-        await client.post(
-            "/api/auth/register", json={"username": "muser2", "password": "password123"}
-        )
-    ).json()["access_token"]
-    assert (await client.get("/api/admin/models", headers=_h(utok))).status_code == 403
+async def test_models_require_token(client):
+    assert (await client.get("/api/models")).status_code == 401

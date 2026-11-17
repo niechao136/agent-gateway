@@ -86,69 +86,35 @@ def test_normalize_assigns_stable_ids():
 
 
 # ── 管理员登录 ────────────────────────────────────────────
-async def test_admin_login_success(client, monkeypatch):
-    from app.routes import auth as auth_mod
-
-    monkeypatch.setattr(auth_mod._settings, "admin_username", "boss")
-    monkeypatch.setattr(auth_mod._settings, "admin_password", "secret123")
-
+# ── v2 统一登录（admin-login 已删除，以下为替代语义）─────────
+async def test_unified_login_returns_role(client, bootstrap_admin):
+    """统一登录返回 role=admin 的用户信息。"""
     r = await client.post(
-        "/api/auth/admin-login", json={"username": "boss", "password": "secret123"}
+        "/api/auth/login",
+        json={"username": bootstrap_admin, "password": "password123"},
     )
     assert r.status_code == 200
     b = r.json()
-    assert b["scope"] == "admin"
+    assert b["user"]["role"] == "admin"
     assert b["access_token"]
 
 
-async def test_admin_login_wrong_password(client, monkeypatch):
-    from app.routes import auth as auth_mod
-
-    monkeypatch.setattr(auth_mod._settings, "admin_username", "boss")
-    monkeypatch.setattr(auth_mod._settings, "admin_password", "secret123")
-
+async def test_unified_login_wrong_password(client, bootstrap_admin):
     r = await client.post(
-        "/api/auth/admin-login", json={"username": "boss", "password": "nope"}
+        "/api/auth/login", json={"username": bootstrap_admin, "password": "nope"}
     )
     assert r.status_code == 401
 
 
-async def test_admin_login_wrong_username(client, monkeypatch):
-    from app.routes import auth as auth_mod
-
-    monkeypatch.setattr(auth_mod._settings, "admin_username", "boss")
-    monkeypatch.setattr(auth_mod._settings, "admin_password", "secret123")
-
+async def test_unified_login_wrong_username(client):
     r = await client.post(
-        "/api/auth/admin-login", json={"username": "other", "password": "secret123"}
+        "/api/auth/login", json={"username": "ghost-user", "password": "x"}
     )
     assert r.status_code == 401
 
 
-async def test_admin_login_when_password_unset(client, monkeypatch):
-    """未配置 ADMIN_PASSWORD 时返回 503，不是 500。"""
-    from app.routes import auth as auth_mod
-
-    monkeypatch.setattr(auth_mod._settings, "admin_password", "")
-
-    r = await client.post(
-        "/api/auth/admin-login", json={"username": "admin", "password": "x"}
-    )
-    assert r.status_code == 503
-
-
-async def test_admin_token_works_on_admin_endpoint(client, monkeypatch):
-    from app.routes import auth as auth_mod
-
-    monkeypatch.setattr(auth_mod._settings, "admin_username", "boss")
-    monkeypatch.setattr(auth_mod._settings, "admin_password", "secret123")
-
-    tok = (
-        await client.post(
-            "/api/auth/admin-login", json={"username": "boss", "password": "secret123"}
-        )
-    ).json()["access_token"]
-
-    assert (await client.get("/api/admin/agents", headers=_h(tok))).status_code == 200
-    # 但管理员 token 不能当用户 token
-    assert (await client.get("/api/chat/agents", headers=_h(tok))).status_code == 403
+async def test_admin_token_works_everywhere(client, atok):
+    """v2：admin 的 token 登录接口与用户接口都能访问（归属由后端校验）。"""
+    assert (await client.get("/api/agents", headers=_h(atok))).status_code == 200
+    assert (await client.get("/api/chat/agents", headers=_h(atok))).status_code == 200
+    assert (await client.get("/api/auth/me", headers=_h(atok))).status_code == 200

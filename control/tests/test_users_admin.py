@@ -1,20 +1,13 @@
 """用户管理接口测试。"""
 
 import pytest
+import pytest_asyncio
 
 pytestmark = pytest.mark.asyncio
 
 
 def _h(t):
     return {"Authorization": f"Bearer {t}"}
-
-
-def _admin_token(monkeypatch):
-    monkeypatch.setenv("ADMIN_USERNAME", "boss")
-    monkeypatch.setenv("ADMIN_PASSWORD", "secret123")
-    from app.security import create_access_token
-
-    return create_access_token("boss", "admin")
 
 
 async def _user(client, name="alice"):
@@ -24,33 +17,47 @@ async def _user(client, name="alice"):
     return r.json()["access_token"]
 
 
-async def test_list_users_requires_admin(client):
+async def test_list_users_requires_admin(client, atok):
     utok = await _user(client)
     assert (await client.get("/api/admin/users", headers=_h(utok))).status_code == 403
     assert (await client.get("/api/admin/users")).status_code == 401
 
 
-async def test_list_users(client, monkeypatch):
+async def test_bootstrap_created_admin_can_login(client, bootstrap_admin):
+    """引导管理员：启动引导创建的账号能用配置密码登录且 role=admin。"""
+    r = await client.post(
+        "/api/auth/login", json={"username": bootstrap_admin, "password": "password123"}
+    )
+    assert r.status_code == 200
+    assert r.json()["user"]["role"] == "admin"
+
+
+async def test_list_users(client, atok, monkeypatch):
     await _user(client, "alice")
     await _user(client, "bob")
-    atok = _admin_token(monkeypatch)
-
+    
     r = await client.get("/api/admin/users", headers=_h(atok))
     assert r.status_code == 200
     names = {u["username"] for u in r.json()}
     assert {"alice", "bob"} <= names
 
 
-async def test_list_users_includes_conversation_count(client, monkeypatch):
-    utok = await _user(client)
-    atok = _admin_token(monkeypatch)
+async def test_list_users_includes_role_field(client, atok, monkeypatch):
+    await _user(client, "alice")
+    users = (await client.get("/api/admin/users", headers=_h(atok))).json()
+    assert all("role" in u for u in users)
+    root = next(u for u in users if u["username"] == "testadmin")
+    assert root["role"] == "admin"
 
+
+async def test_list_users_includes_conversation_count(client, atok, monkeypatch):
+    utok = await _user(client)
+    
     # 建一个已发布 Agent 并开会话
-    await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": "b1", "name": "B1"}
-    )
-    aid = (await client.get("/api/admin/agents", headers=_h(atok))).json()[0]["id"]
-    await client.post(f"/api/admin/agents/{aid}/publish", headers=_h(atok))
+    aid = (
+        await client.post("/api/agents", headers=_h(atok), json={"slug": "b1", "name": "B1"})
+    ).json()["id"]
+    await client.post(f"/api/agents/{aid}/publish", headers=_h(atok))
     await client.post(
         "/api/chat/conversations", headers=_h(utok), json={"agent_slug": "b1"}
     )
@@ -60,11 +67,13 @@ async def test_list_users_includes_conversation_count(client, monkeypatch):
     assert alice["conversation_count"] == 1
 
 
-async def test_disable_user(client, monkeypatch):
+async def test_disable_user(client, atok, monkeypatch):
     utok = await _user(client)
-    atok = _admin_token(monkeypatch)
-
-    uid = (await client.get("/api/admin/users", headers=_h(atok))).json()[0]["id"]
+    
+    uid = next(
+        u["id"] for u in (await client.get("/api/admin/users", headers=_h(atok))).json()
+        if u["username"] == "alice"
+    )
     r = await client.patch(
         f"/api/admin/users/{uid}", headers=_h(atok), json={"disabled": True}
     )
@@ -76,10 +85,50 @@ async def test_disable_user(client, monkeypatch):
     assert r.status_code == 401
 
 
-async def test_enable_user(client, monkeypatch):
-    utok = await _user(client)
-    atok = _admin_token(monkeypatch)
+async def test_change_role(client, atok, monkeypatch):
+    """v2 新增：管理员可调整用户角色。"""
+    utok = await _user(client, "upme")
+    uid = next(
+        u["id"] for u in (await client.get("/api/admin/users", headers=_h(atok))).json()
+        if u["username"] == "upme"
+    )
+
+    r = await client.patch(f"/api/admin/users/{uid}", headers=_h(atok), json={"role": "admin"})
+    assert r.status_code == 200
+    assert r.json()["role"] == "admin"
+
+    # 提权后该用户可通过管理员接口
+    assert (await client.get("/api/admin/users", headers=_h(utok))).status_code == 200
+
+    # 再降回 user
+    r = await client.patch(f"/api/admin/users/{uid}", headers=_h(atok), json={"role": "user"})
+    assert r.json()["role"] == "user"
+    assert (await client.get("/api/admin/users", headers=_h(utok))).status_code == 403
+
+
+async def test_cannot_demote_last_admin(client, atok, monkeypatch):
+    users = (await client.get("/api/admin/users", headers=_h(atok))).json()
+    root = next(u for u in users if u["role"] == "admin" and u["username"] == "testadmin")
+    r = await client.patch(
+        f"/api/admin/users/{root['id']}", headers=_h(atok), json={"role": "user"}
+    )
+    assert r.status_code == 409
+
+
+async def test_invalid_role_422(client, atok, monkeypatch):
     uid = (await client.get("/api/admin/users", headers=_h(atok))).json()[0]["id"]
+    r = await client.patch(
+        f"/api/admin/users/{uid}", headers=_h(atok), json={"role": "superadmin"}
+    )
+    assert r.status_code == 422
+
+
+async def test_enable_user(client, atok, monkeypatch):
+    utok = await _user(client)
+    uid = next(
+        u["id"] for u in (await client.get("/api/admin/users", headers=_h(atok))).json()
+        if u["username"] == "alice"
+    )
 
     await client.patch(f"/api/admin/users/{uid}", headers=_h(atok), json={"disabled": True})
     r = await client.patch(
@@ -89,10 +138,12 @@ async def test_enable_user(client, monkeypatch):
     assert (await client.get("/api/chat/agents", headers=_h(utok))).status_code == 200
 
 
-async def test_update_display_name(client, monkeypatch):
+async def test_update_display_name(client, atok, monkeypatch):
     await _user(client)
-    atok = _admin_token(monkeypatch)
-    uid = (await client.get("/api/admin/users", headers=_h(atok))).json()[0]["id"]
+    uid = next(
+        u["id"] for u in (await client.get("/api/admin/users", headers=_h(atok))).json()
+        if u["username"] == "alice"
+    )
 
     r = await client.patch(
         f"/api/admin/users/{uid}", headers=_h(atok), json={"display_name": "爱丽丝"}
@@ -100,15 +151,14 @@ async def test_update_display_name(client, monkeypatch):
     assert r.json()["display_name"] == "爱丽丝"
 
 
-async def test_update_unknown_user_404(client, monkeypatch):
-    atok = _admin_token(monkeypatch)
+async def test_update_unknown_user_404(client, atok, monkeypatch):
     r = await client.patch(
         "/api/admin/users/9999", headers=_h(atok), json={"disabled": True}
     )
     assert r.status_code == 404
 
 
-async def test_user_cannot_update_self(client):
+async def test_user_cannot_update_self(client, atok):
     """普通用户不能调用管理接口改自己。"""
     utok = await _user(client)
     r = await client.patch(

@@ -1,12 +1,21 @@
-"""应用入口。"""
+"""应用入口。
 
+v2 路由挂载（SPEC-v2 批次 1）：
+- /api/agents、/api/models、/api/a2a/inbound —— 登录即可，写操作校验归属
+- /api/admin/users —— 仅管理员
+- /api/chat、/api/chat/agents —— 登录即可
+"""
+
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func, select
 
 from .config import get_settings
-from .database import init_models
+from .database import get_session_factory, init_models
+from .models import User, UserRole
 from .routes import (
     a2a_inbound,
     agent_a2a,
@@ -19,14 +28,55 @@ from .routes import (
     users,
 )
 from .scheduler import CleanupTask
+from .security import hash_password
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 _cleanup = CleanupTask()
 
 
+async def _bootstrap_admin() -> None:
+    """引导管理员（SPEC-v2 决策 1）。
+
+    启动时若 users 表无任何 role=admin：
+    - ADMIN_USERNAME 对应用户已存在（role=user）→ 提权为 admin
+    - 否则创建新账号
+    数据是丢弃重建的，不存在存量提权遗留问题。
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        admin_count = (
+            await session.execute(
+                select(func.count()).select_from(User).where(User.role == UserRole.ADMIN)
+            )
+        ).scalar_one()
+        if admin_count > 0:
+            return
+
+        username = _settings.admin_username
+        user = (
+            await session.execute(select(User).where(User.username == username))
+        ).scalar_one_or_none()
+        if user is not None:
+            user.role = UserRole.ADMIN
+            logger.info("引导管理员：已将已有用户 %s 提权为 admin", username)
+        else:
+            user = User(
+                username=username,
+                password_hash=hash_password(_settings.admin_password),
+                display_name="Administrator",
+                role=UserRole.ADMIN,
+            )
+            session.add(user)
+            logger.info("引导管理员：已创建 admin 账号 %s", username)
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_models()
+    await _bootstrap_admin()
     _cleanup.start()
     try:
         yield
@@ -34,7 +84,7 @@ async def lifespan(app: FastAPI):
         await _cleanup.stop()
 
 
-app = FastAPI(title="agent-gateway control", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="agent-gateway control", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,17 +95,17 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(agents.admin_router)
+app.include_router(agents.router)          # /api/agents
+app.include_router(agents.chat_router)     # /api/chat/agents
 app.include_router(agent_skills.router)
 app.include_router(agent_a2a.router)
 app.include_router(agent_mcp.router)
-app.include_router(model_routes.router)
-app.include_router(a2a_inbound.router)
-app.include_router(agents.user_router)
-app.include_router(users.router)
+app.include_router(model_routes.router)    # /api/models
+app.include_router(a2a_inbound.router)     # /api/a2a/inbound
+app.include_router(users.router)           # /api/admin/users
 app.include_router(chat.router)
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "agent-gateway-control", "version": "0.1.0"}
+    return {"status": "ok", "service": "agent-gateway-control", "version": "0.2.0"}

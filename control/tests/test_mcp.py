@@ -9,18 +9,12 @@ def _h(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def _admin_token():
-    from app.security import create_access_token
 
-    return create_access_token("admin", "admin")
-
-
-async def _make_agent(client, slug="m1") -> int:
-    atok = _admin_token()
+async def _make_agent(client, atok, slug="m1") -> int:
     await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": slug, "name": slug}
+        "/api/agents", headers=_h(atok), json={"slug": slug, "name": slug}
     )
-    agents = (await client.get("/api/admin/agents", headers=_h(atok))).json()
+    agents = (await client.get("/api/agents", headers=_h(atok))).json()
     return next(a["id"] for a in agents if a["slug"] == slug)
 
 
@@ -72,18 +66,18 @@ def patch_mcp(monkeypatch):
     yield state
 
 
-async def test_list_empty(client, patch_mcp):
-    aid = await _make_agent(client)
-    r = await client.get(f"/api/admin/agents/{aid}/mcp", headers=_h(_admin_token()))
+async def test_list_empty(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
+    r = await client.get(f"/api/agents/{aid}/mcp", headers=_h(atok))
     assert r.status_code == 200
     assert r.json()["servers"] == []
 
 
-async def test_add_stdio(client, patch_mcp):
-    aid = await _make_agent(client)
+async def test_add_stdio(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/mcp",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/mcp",
+        headers=_h(atok),
         json={
             "name": "fs",
             "transport": "stdio",
@@ -96,90 +90,90 @@ async def test_add_stdio(client, patch_mcp):
     assert r.json()["command"] == "npx"
 
 
-async def test_add_stdio_without_command_422(client, patch_mcp):
-    aid = await _make_agent(client)
+async def test_add_stdio_without_command_422(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/mcp",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/mcp",
+        headers=_h(atok),
         json={"name": "bad", "transport": "stdio"},
     )
     assert r.status_code == 422
 
 
-async def test_add_http_without_url_422(client, patch_mcp):
-    aid = await _make_agent(client)
+async def test_add_http_without_url_422(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/mcp",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/mcp",
+        headers=_h(atok),
         json={"name": "bad", "transport": "sse"},
     )
     assert r.status_code == 422
 
 
-async def test_add_http(client, patch_mcp):
-    aid = await _make_agent(client)
+async def test_add_http(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/mcp",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/mcp",
+        headers=_h(atok),
         json={"name": "remote", "transport": "sse", "url": "https://x/sse"},
     )
     assert r.status_code == 201
     assert r.json()["url"] == "https://x/sse"
 
 
-async def test_duplicate_name_502(client, patch_mcp):
+async def test_duplicate_name_502(client, atok, patch_mcp):
     """hermes 侧重复会报错，控制层透传为 502。"""
-    aid = await _make_agent(client)
-    h = _h(_admin_token())
+    aid = await _make_agent(client, atok)
+    h = _h(atok)
     body = {"name": "dup", "transport": "stdio", "command": "x"}
-    assert (await client.post(f"/api/admin/agents/{aid}/mcp", headers=h, json=body)).status_code == 201
-    assert (await client.post(f"/api/admin/agents/{aid}/mcp", headers=h, json=body)).status_code == 502
+    assert (await client.post(f"/api/agents/{aid}/mcp", headers=h, json=body)).status_code == 201
+    assert (await client.post(f"/api/agents/{aid}/mcp", headers=h, json=body)).status_code == 502
 
 
-async def test_test_and_toggle(client, patch_mcp):
-    aid = await _make_agent(client)
-    h = _h(_admin_token())
+async def test_test_and_toggle(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
+    h = _h(atok)
     await client.post(
-        f"/api/admin/agents/{aid}/mcp",
+        f"/api/agents/{aid}/mcp",
         headers=h,
         json={"name": "fs", "transport": "stdio", "command": "x"},
     )
-    r = await client.post(f"/api/admin/agents/{aid}/mcp/fs/test", headers=h)
+    r = await client.post(f"/api/agents/{aid}/mcp/fs/test", headers=h)
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
     r = await client.put(
-        f"/api/admin/agents/{aid}/mcp/fs/enabled", headers=h, json={"enabled": False}
+        f"/api/agents/{aid}/mcp/fs/enabled", headers=h, json={"enabled": False}
     )
     assert r.status_code == 200
     assert patch_mcp["fs"]["enabled"] is False
 
 
-async def test_delete(client, patch_mcp):
-    aid = await _make_agent(client)
-    h = _h(_admin_token())
+async def test_delete(client, atok, patch_mcp):
+    aid = await _make_agent(client, atok)
+    h = _h(atok)
     await client.post(
-        f"/api/admin/agents/{aid}/mcp",
+        f"/api/agents/{aid}/mcp",
         headers=h,
         json={"name": "fs", "transport": "stdio", "command": "x"},
     )
-    assert (await client.delete(f"/api/admin/agents/{aid}/mcp/fs", headers=h)).status_code == 204
-    assert (await client.get(f"/api/admin/agents/{aid}/mcp", headers=h)).json()["servers"] == []
+    assert (await client.delete(f"/api/agents/{aid}/mcp/fs", headers=h)).status_code == 204
+    assert (await client.get(f"/api/agents/{aid}/mcp", headers=h)).json()["servers"] == []
 
 
-async def test_catalog(client, patch_mcp):
-    r = await client.get("/api/admin/agents/mcp-catalog/all", headers=_h(_admin_token()))
+async def test_catalog(client, atok, patch_mcp):
+    r = await client.get("/api/agents/mcp-catalog/all", headers=_h(atok))
     assert r.status_code == 200
     assert r.json()["entries"][0]["name"] == "filesystem"
 
 
-async def test_requires_admin(client, patch_mcp):
+async def test_requires_admin(client, atok, patch_mcp):
     utok = (
         await client.post(
             "/api/auth/register", json={"username": "muser", "password": "password123"}
         )
     ).json()["access_token"]
-    aid = await _make_agent(client)
+    aid = await _make_agent(client, atok)
     assert (
-        await client.get(f"/api/admin/agents/{aid}/mcp", headers=_h(utok))
+        await client.get(f"/api/agents/{aid}/mcp", headers=_h(utok))
     ).status_code == 403

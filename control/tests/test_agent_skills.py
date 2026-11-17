@@ -12,18 +12,12 @@ def _h(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def _admin_token():
-    from app.security import create_access_token
 
-    return create_access_token("admin", "admin")
-
-
-async def _make_agent(client, slug="b1") -> int:
-    atok = _admin_token()
+async def _make_agent(client, atok, slug="b1") -> int:
     await client.post(
-        "/api/admin/agents", headers=_h(atok), json={"slug": slug, "name": slug}
+        "/api/agents", headers=_h(atok), json={"slug": slug, "name": slug}
     )
-    agents = (await client.get("/api/admin/agents", headers=_h(atok))).json()
+    agents = (await client.get("/api/agents", headers=_h(atok))).json()
     return next(a["id"] for a in agents if a["slug"] == slug)
 
 
@@ -63,19 +57,19 @@ def patch_skills(monkeypatch):
     yield state
 
 
-async def test_list_agent_skills(client, patch_skills):
-    aid = await _make_agent(client)
-    r = await client.get(f"/api/admin/agents/{aid}/skills", headers=_h(_admin_token()))
+async def test_list_agent_skills(client, atok, patch_skills):
+    aid = await _make_agent(client, atok)
+    r = await client.get(f"/api/agents/{aid}/skills", headers=_h(atok))
     assert r.status_code == 200
     names = {s["name"] for s in r.json()}
     assert names == {"codex", "web", "memory"}
 
 
-async def test_toggle_skill(client, patch_skills):
-    aid = await _make_agent(client)
+async def test_toggle_skill(client, atok, patch_skills):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/skills/toggle",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/skills/toggle",
+        headers=_h(atok),
         json={"name": "codex", "enabled": False},
     )
     assert r.status_code == 200
@@ -83,21 +77,21 @@ async def test_toggle_skill(client, patch_skills):
     assert patch_skills["codex"] is False
 
 
-async def test_toggle_unknown_skill_404(client, patch_skills):
-    aid = await _make_agent(client)
+async def test_toggle_unknown_skill_404(client, atok, patch_skills):
+    aid = await _make_agent(client, atok)
     r = await client.post(
-        f"/api/admin/agents/{aid}/skills/toggle",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/skills/toggle",
+        headers=_h(atok),
         json={"name": "nope", "enabled": True},
     )
     assert r.status_code == 404
 
 
-async def test_replace_skills(client, patch_skills):
-    aid = await _make_agent(client)
+async def test_replace_skills(client, atok, patch_skills):
+    aid = await _make_agent(client, atok)
     r = await client.put(
-        f"/api/admin/agents/{aid}/skills",
-        headers=_h(_admin_token()),
+        f"/api/agents/{aid}/skills",
+        headers=_h(atok),
         json={"enabled": ["web"]},
     )
     assert r.status_code == 200
@@ -105,19 +99,10 @@ async def test_replace_skills(client, patch_skills):
     assert enabled == {"web"}
 
 
-async def test_skills_requires_admin(client):
-    utok = (
-        await client.post(
-            "/api/auth/register", json={"username": "user1", "password": "password123"}
-        )
-    ).json()["access_token"]
-    aid = await _make_agent(client)
-    # 普通用户访问 → 403（不需要 skills 真实可用）
-    assert (
-        await client.get(f"/api/admin/agents/{aid}/skills", headers=_h(utok))
-    ).status_code == 403
+async def test_skills_requires_login(client):
+    assert (await client.get("/api/agents/1/skills")).status_code == 401
 
 
-async def test_skills_unknown_agent_404(client):
-    r = await client.get("/api/admin/agents/9999/skills", headers=_h(_admin_token()))
+async def test_skills_unknown_agent_404(client, atok):
+    r = await client.get("/api/agents/9999/skills", headers=_h(atok))
     assert r.status_code == 404

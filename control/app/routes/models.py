@@ -1,4 +1,4 @@
-"""管理员：模型模板库 + 应用到 Agent。"""
+"""模型模板库 + 应用到 Agent（登录即可，写操作校验归属）。"""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from ..config import get_settings
 from ..database import get_session
 from ..hermes.a2a import A2AError
 from ..hermes.models_cfg import apply_model, read_model
-from ..models import Agent, ModelTemplate
-from ..security import CurrentAdmin
+from ..models import Agent, ModelTemplate, UserRole
+from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
 
-router = APIRouter(prefix="/api/admin", tags=["admin:models"])
+router = APIRouter(tags=["models"])
 
 
 class TemplateIn(BaseModel):
@@ -44,6 +44,7 @@ class TemplateUpdateIn(BaseModel):
 class TemplateOut(BaseModel):
     id: int
     name: str
+    owner_id: int
     model: str
     provider: str
     base_url: str | None
@@ -58,6 +59,7 @@ def _out(t: ModelTemplate) -> TemplateOut:
     return TemplateOut(
         id=t.id,
         name=t.name,
+        owner_id=t.owner_id,
         model=t.model,
         provider=t.provider,
         base_url=t.base_url,
@@ -67,21 +69,22 @@ def _out(t: ModelTemplate) -> TemplateOut:
     )
 
 
-@router.get("/models", response_model=list[TemplateOut])
+@router.get("/api/models", response_model=list[TemplateOut])
 async def list_templates(
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[TemplateOut]:
-    rows = (
-        await session.execute(select(ModelTemplate).order_by(ModelTemplate.id))
-    ).scalars().all()
+    stmt = select(ModelTemplate).order_by(ModelTemplate.id)
+    if user.role != UserRole.ADMIN:
+        stmt = stmt.where(ModelTemplate.owner_id == user.id)
+    rows = (await session.execute(stmt)).scalars().all()
     return [_out(t) for t in rows]
 
 
-@router.post("/models", response_model=TemplateOut, status_code=201)
+@router.post("/api/models", response_model=TemplateOut, status_code=201)
 async def create_template(
     body: TemplateIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TemplateOut:
     exists = (
@@ -97,6 +100,7 @@ async def create_template(
         base_url=body.base_url,
         api_key=body.api_key,
         description=body.description,
+        owner_id=user.id,
     )
     session.add(t)
     await session.commit()
@@ -104,11 +108,11 @@ async def create_template(
     return _out(t)
 
 
-@router.patch("/models/{template_id}", response_model=TemplateOut)
+@router.patch("/api/models/{template_id}", response_model=TemplateOut)
 async def update_template(
     template_id: int,
     body: TemplateUpdateIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TemplateOut:
     t = (
@@ -116,6 +120,8 @@ async def update_template(
     ).scalar_one_or_none()
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+    if not can_modify(user, t.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权修改他人的模板")
 
     for field in ("model", "provider", "base_url", "api_key", "description"):
         v = getattr(body, field)
@@ -127,10 +133,10 @@ async def update_template(
     return _out(t)
 
 
-@router.delete("/models/{template_id}", status_code=204)
+@router.delete("/api/models/{template_id}", status_code=204)
 async def delete_template(
     template_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     t = (
@@ -138,15 +144,17 @@ async def delete_template(
     ).scalar_one_or_none()
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+    if not can_modify(user, t.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权删除他人的模板")
     await session.delete(t)
     await session.commit()
 
 
-@router.post("/agents/{agent_id}/apply-model/{template_id}")
+@router.post("/api/agents/{agent_id}/apply-model/{template_id}")
 async def apply_template(
     agent_id: int,
     template_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     """把模板写入该 Agent 的 profile config.yaml。"""
@@ -155,12 +163,16 @@ async def apply_template(
     ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
 
     t = (
         await session.execute(select(ModelTemplate).where(ModelTemplate.id == template_id))
     ).scalar_one_or_none()
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+    if not can_modify(user, t.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权使用他人的模板")
 
     try:
         res = apply_model(
@@ -176,10 +188,10 @@ async def apply_template(
     return {"applied": True, **res}
 
 
-@router.get("/agents/{agent_id}/effective-model")
+@router.get("/api/agents/{agent_id}/effective-model")
 async def effective_model(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     agent = (
@@ -187,6 +199,8 @@ async def effective_model(
     ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权查看他人的 Agent")
     return {
         "profile": agent.profile_name,
         "model": read_model(agent.profile_name, _settings.hermes_data_root),

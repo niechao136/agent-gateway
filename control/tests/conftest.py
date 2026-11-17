@@ -191,6 +191,65 @@ async def client(session_factory) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides.clear()
 
 
+async def _register(client: AsyncClient, username: str, password: str = "password123"):
+    """注册并返回 token；用户名已存在则直接登录。"""
+    r = await client.post(
+        "/api/auth/register", json={"username": username, "password": password}
+    )
+    if r.status_code == 201:
+        return r.json()["access_token"]
+    r = await client.post("/api/auth/login", json={"username": username, "password": password})
+    return r.json()["access_token"]
+
+
+@pytest_asyncio.fixture
+async def user_token(client) -> str:
+    """普通注册用户 token。"""
+    return await _register(client, "testuser")
+
+
+@pytest_asyncio.fixture
+async def atok(client, bootstrap_admin) -> str:
+    """管理员 token（全局可用）：登录 bootstrap 出的 testadmin 账号。"""
+    r = await client.post(
+        "/api/auth/login", json={"username": bootstrap_admin, "password": "password123"}
+    )
+    return r.json()["access_token"]
+
+
+@pytest_asyncio.fixture
+async def bootstrap_admin(client, session_factory, monkeypatch):
+    """把 main._bootstrap_admin 指到测试库并执行，返回 admin 用户名。
+
+    `_bootstrap_admin` 走的是 get_session_factory()，必须重定向到测试内存库，
+    否则会写到模块级真实 engine（没有建表）上。
+    """
+    import app.main as main_mod
+
+    username = "testadmin"
+    monkeypatch.setattr(main_mod, "get_session_factory", lambda: session_factory)
+    # 单独跑一次（lifespan 在 ASGITransport 下不触发）
+    # 但要防止重复执行报 unique 冲突：无 admin 才执行
+    from sqlalchemy import func, select
+
+    from app.models import User
+
+    async with session_factory() as s:
+        n = (
+            await s.execute(
+                select(func.count()).select_from(User).where(User.role == "admin")
+            )
+        ).scalar_one()
+    if n == 0:
+        from app.config import get_settings
+
+        sset = get_settings()
+        monkeypatch.setattr(sset, "admin_username", username)
+        monkeypatch.setattr(sset, "admin_password", "password123")
+        await main_mod._bootstrap_admin()
+    return username
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"

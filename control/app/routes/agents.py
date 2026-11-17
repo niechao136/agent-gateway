@@ -1,8 +1,8 @@
-"""Agent 管理：管理员 CRUD + 用户可见列表。
+"""Agent CRUD：单一用户体系（SPEC-v2 批次 1）。
 
-权限模型（SPEC §9）：
-- /api/admin/agents/*  需 admin scope
-- /api/chat/agents     需 user scope，只返回 published
+权限模型（SPEC-v2 决策 2/4）：
+- /api/agents/*    登录即可访问；写操作校验归属（can_modify）
+- /api/chat/agents 登录即可，返回自己拥有的 + 所有 published
 """
 
 from __future__ import annotations
@@ -12,25 +12,25 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
 from ..hermes import provisioner as prov
 from ..hermes import (
     ProvisionError,
-    disabled_toolsets_for,
     profile_name_for,
     profile_status,
     validate_slug,
 )
-from ..models import Agent, AgentStatus, ToolsetTier
-from ..security import CurrentAdmin, CurrentUser
+from ..hermes.toolsets import default_disabled, normalize_disabled
+from ..models import Agent, AgentStatus, UserRole
+from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
 
-admin_router = APIRouter(prefix="/api/admin/agents", tags=["admin:agents"])
-user_router = APIRouter(prefix="/api/chat/agents", tags=["chat:agents"])
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+chat_router = APIRouter(prefix="/api/chat/agents", tags=["chat:agents"])
 
 
 # ── Schemas ───────────────────────────────────────────────
@@ -41,7 +41,7 @@ class AgentCreateIn(BaseModel):
     soul: str | None = None
     model: str | None = None
     provider: str | None = None
-    toolset_tier: ToolsetTier = ToolsetTier.PUBLIC
+    disabled_toolsets: list[str] | None = None  # 缺省 = 只读助手默认集
     status: AgentStatus = AgentStatus.DRAFT
 
 
@@ -51,7 +51,7 @@ class AgentUpdateIn(BaseModel):
     soul: str | None = None
     model: str | None = None
     provider: str | None = None
-    toolset_tier: ToolsetTier | None = None
+    disabled_toolsets: list[str] | None = None
     status: AgentStatus | None = None
 
 
@@ -61,8 +61,8 @@ class AgentOut(BaseModel):
     name: str
     description: str | None
     profile_name: str
+    owner_id: int
     status: str
-    toolset_tier: str
     disabled_toolsets: list[str] = []
 
     model_config = {"from_attributes": True}
@@ -76,7 +76,7 @@ class AgentStatusOut(AgentOut):
 
 def _to_out(agent: Agent, *, with_status: bool = False, live: dict | None = None) -> AgentOut:
     base = AgentOut.model_validate(agent)
-    base.disabled_toolsets = list(disabled_toolsets_for(agent.toolset_tier))
+    base.disabled_toolsets = list(agent.disabled_toolsets or [])
     if not with_status:
         return base
     out = AgentStatusOut(**base.model_dump())
@@ -89,22 +89,25 @@ def _to_out(agent: Agent, *, with_status: bool = False, live: dict | None = None
     return out
 
 
-# ── 管理员 ────────────────────────────────────────────────
-@admin_router.get("", response_model=list[AgentOut])
+# ── 列表 / 详情 ───────────────────────────────────────────
+@router.get("", response_model=list[AgentOut])
 async def list_agents(
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[AgentOut]:
-    rows = (
-        await session.execute(select(Agent).order_by(Agent.created_at.desc()))
-    ).scalars().all()
+    # 管理员看全部；普通用户看自己拥有的（含草稿）
+    if user.role == UserRole.ADMIN:
+        stmt = select(Agent).order_by(Agent.created_at.desc())
+    else:
+        stmt = select(Agent).where(Agent.owner_id == user.id).order_by(Agent.created_at.desc())
+    rows = (await session.execute(stmt)).scalars().all()
     return [_to_out(a) for a in rows]
 
 
-@admin_router.post("", response_model=AgentStatusOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AgentStatusOut, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     body: AgentCreateIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentStatusOut:
     try:
@@ -118,13 +121,20 @@ async def create_agent(
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "slug 已被占用")
 
+    disabled = (
+        normalize_disabled(body.disabled_toolsets)
+        if body.disabled_toolsets is not None
+        else default_disabled()
+    )
+
     agent = Agent(
         slug=body.slug,
         name=body.name,
         description=body.description,
-        profile_name=profile_name_for(body.slug),
+        profile_name=profile_name_for(user.id, body.slug),
+        owner_id=user.id,
         status=body.status,
-        toolset_tier=body.toolset_tier,
+        disabled_toolsets=disabled,
     )
     session.add(agent)
     await session.flush()  # 拿到 id
@@ -141,38 +151,38 @@ async def create_agent(
     await session.commit()
     await session.refresh(agent)
 
-    logger.info("创建 Agent %s -> profile %s", agent.slug, agent.profile_name)
+    logger.info("创建 Agent %s -> profile %s (owner=%s)", agent.slug, agent.profile_name, user.id)
     out = _to_out(agent, with_status=True)
     out.profile_exists = True
     out.gateway_running = bool(result.get("served_now", True))
     return out
 
 
-@admin_router.get("/{agent_id}", response_model=AgentStatusOut)
+@router.get("/{agent_id}", response_model=AgentStatusOut)
 async def get_agent(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     live: bool = Query(default=False),
 ) -> AgentStatusOut:
-    agent = await _get_or_404(session, agent_id)
+    agent = await _get_owned_or_404(session, agent_id, user)
     live_info = None
     if live:
         try:
-            live_info = await profile_status(agent.slug)
+            live_info = await profile_status(agent.owner_id, agent.slug)
         except Exception as exc:  # noqa: BLE001 - dashboard 不可用不应让接口 500
             logger.warning("查询 profile 状态失败: %s", exc)
     return _to_out(agent, with_status=True, live=live_info)
 
 
-@admin_router.patch("/{agent_id}", response_model=AgentStatusOut)
+@router.patch("/{agent_id}", response_model=AgentStatusOut)
 async def update_agent(
     agent_id: int,
     body: AgentUpdateIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentStatusOut:
-    agent = await _get_or_404(session, agent_id)
+    agent = await _get_owned_or_404(session, agent_id, user)
 
     if body.name is not None:
         agent.name = body.name
@@ -180,8 +190,8 @@ async def update_agent(
         agent.description = body.description
     if body.status is not None:
         agent.status = body.status
-    if body.toolset_tier is not None:
-        agent.toolset_tier = body.toolset_tier
+    if body.disabled_toolsets is not None:
+        agent.disabled_toolsets = normalize_disabled(body.disabled_toolsets)
 
     try:
         await prov.sync_agent_profile(
@@ -196,13 +206,13 @@ async def update_agent(
     return _to_out(agent, with_status=True)
 
 
-@admin_router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    agent = await _get_or_404(session, agent_id)
+    agent = await _get_owned_or_404(session, agent_id, user)
     try:
         await prov.delete_agent_profile(agent)
     except Exception as exc:  # noqa: BLE001
@@ -212,52 +222,59 @@ async def delete_agent(
     await session.commit()
 
 
-@admin_router.post("/{agent_id}/publish", response_model=AgentStatusOut)
+@router.post("/{agent_id}/publish", response_model=AgentStatusOut)
 async def publish_agent(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentStatusOut:
-    agent = await _get_or_404(session, agent_id)
+    agent = await _get_owned_or_404(session, agent_id, user)
     agent.status = AgentStatus.PUBLISHED
     await session.commit()
     await session.refresh(agent)
     return _to_out(agent, with_status=True)
 
 
-@admin_router.post("/{agent_id}/unpublish", response_model=AgentStatusOut)
+@router.post("/{agent_id}/unpublish", response_model=AgentStatusOut)
 async def unpublish_agent(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentStatusOut:
-    agent = await _get_or_404(session, agent_id)
+    agent = await _get_owned_or_404(session, agent_id, user)
     agent.status = AgentStatus.DRAFT
     await session.commit()
     await session.refresh(agent)
     return _to_out(agent, with_status=True)
 
 
-# ── 用户（只读，只看 published）────────────────────────────
-@user_router.get("", response_model=list[AgentOut])
+# ── 对话页可见列表：自己的 + published ─────────────────────
+@chat_router.get("", response_model=list[AgentOut])
 async def list_visible_agents(
-    _: CurrentUser,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[AgentOut]:
-    rows = (
-        await session.execute(
-            select(Agent)
-            .where(Agent.status == AgentStatus.PUBLISHED)
-            .order_by(Agent.name)
+    stmt = (
+        select(Agent)
+        .where(
+            or_(
+                Agent.owner_id == user.id,
+                Agent.status == AgentStatus.PUBLISHED,
+            )
         )
-    ).scalars().all()
+        .order_by(Agent.name)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
     return [_to_out(a) for a in rows]
 
 
-async def _get_or_404(session: AsyncSession, agent_id: int) -> Agent:
+async def _get_owned_or_404(session: AsyncSession, agent_id: int, user) -> Agent:
+    """读取并校验归属：admin 全通过，否则必须 owner_id == user.id（SPEC-v2 决策 4）。"""
     agent = (
         await session.execute(select(Agent).where(Agent.id == agent_id))
     ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
     return agent

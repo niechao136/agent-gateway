@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
-from ..models import Conversation, User
+from ..models import Conversation, User, UserRole
 from ..security import CurrentAdmin
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ class UserAdminOut(BaseModel):
     username: str
     email: str | None
     display_name: str | None
+    role: str
     disabled: bool
     created_at: datetime | None
     last_login_at: datetime | None
@@ -39,6 +40,7 @@ class UserAdminOut(BaseModel):
 class UserUpdateIn(BaseModel):
     disabled: bool | None = None
     display_name: str | None = None
+    role: str | None = None  # "user" | "admin"
 
 
 @router.get("", response_model=list[UserAdminOut])
@@ -73,7 +75,7 @@ async def list_users(
 async def update_user(
     user_id: int,
     body: UserUpdateIn,
-    _: CurrentAdmin,
+    current: CurrentAdmin,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> UserAdminOut:
     user = (
@@ -86,6 +88,19 @@ async def update_user(
         user.disabled = body.disabled
     if body.display_name is not None:
         user.display_name = body.display_name
+    if body.role is not None:
+        if body.role not in (UserRole.USER, UserRole.ADMIN):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "role 只能是 user 或 admin")
+        # 不能把自己降级出最后一个 admin
+        if user.id == current.id and body.role != UserRole.ADMIN:
+            admin_count = (
+                await session.execute(
+                    select(func.count()).select_from(User).where(User.role == UserRole.ADMIN)
+                )
+            ).scalar_one()
+            if admin_count <= 1:
+                raise HTTPException(status.HTTP_409_CONFLICT, "不能移除最后一名管理员")
+        user.role = body.role
 
     await session.commit()
     await session.refresh(user)

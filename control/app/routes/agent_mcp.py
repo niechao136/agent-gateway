@@ -1,4 +1,4 @@
-"""管理员：Agent 的 MCP 服务器配置。"""
+"""Agent 的 MCP 服务器配置（登录即可，写操作校验归属）。"""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_session
 from ..hermes import mcp as mcp_svc
 from ..models import Agent
-from ..security import CurrentAdmin
+from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/admin/agents", tags=["admin:mcp"])
+router = APIRouter(prefix="/api/agents", tags=["agent-mcp"])
 
 
 class MCPServerIn(BaseModel):
@@ -38,22 +38,24 @@ class MCPServerIn(BaseModel):
     enabled: bool = True
 
 
-async def _agent_or_404(session: AsyncSession, agent_id: int) -> Agent:
+async def _agent_or_404(session: AsyncSession, agent_id: int, user) -> Agent:
     agent = (
         await session.execute(select(Agent).where(Agent.id == agent_id))
     ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
     return agent
 
 
 @router.get("/{agent_id}/mcp")
 async def list_mcp(
     agent_id: int,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     try:
         servers = await mcp_svc.list_servers(agent.profile_name)
     except mcp_svc.MCPError as exc:
@@ -65,10 +67,10 @@ async def list_mcp(
 async def add_mcp(
     agent_id: int,
     body: MCPServerIn,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     payload: dict[str, Any] = {
         "name": body.name,
         "transport": body.transport,
@@ -103,10 +105,10 @@ async def add_mcp(
 async def delete_mcp(
     agent_id: int,
     name: str,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     try:
         await mcp_svc.delete_server(agent.profile_name, name)
     except mcp_svc.MCPError as exc:
@@ -117,10 +119,10 @@ async def delete_mcp(
 async def test_mcp(
     agent_id: int,
     name: str,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     try:
         return await mcp_svc.test_server(agent.profile_name, name)
     except mcp_svc.MCPError as exc:
@@ -132,10 +134,10 @@ async def toggle_mcp(
     agent_id: int,
     name: str,
     body: dict,
-    _: CurrentAdmin,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    agent = await _agent_or_404(session, agent_id)
+    agent = await _agent_or_404(session, agent_id, user)
     enabled = bool(body.get("enabled"))
     try:
         return await mcp_svc.set_enabled(agent.profile_name, name, enabled)
@@ -144,7 +146,7 @@ async def toggle_mcp(
 
 
 @router.get("/mcp-catalog/all")
-async def get_catalog(_: CurrentAdmin) -> dict:
+async def get_catalog(_: CurrentUser) -> dict:
     """官方精选 MCP 目录（全局，与 profile 无关）。"""
     try:
         return {"entries": await mcp_svc.catalog()}
