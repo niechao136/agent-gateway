@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..connectors.base import registry
-from ..database import get_session
+from ..database import get_session, SessionLocal
 from ..models import Agent, Connector, UserRole
 from ..security import CurrentUser, can_modify
 
@@ -277,9 +277,6 @@ async def connector_events(
     async def gen():
         while True:
             try:
-                # 独立会话读 DB（长连接不能占用请求级 session）
-                from ..database import SessionLocal
-
                 async with SessionLocal() as s:
                     stmt = select(Connector).order_by(Connector.id)
                     if not is_admin:
