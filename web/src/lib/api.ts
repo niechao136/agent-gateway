@@ -202,8 +202,12 @@ export async function unpublishAgent(id: number): Promise<Agent> {
   return request<Agent>(`/agents/${id}/unpublish`, { method: "POST" });
 }
 
-export async function getAgent(id: number): Promise<Agent> {
-  return request<Agent>(`/agents/${id}`);
+/** 管理列表：admin 全部 / 普通用户自己的（别名统一各页面调用）。 */
+export async function listAgents(): Promise<Agent[]> {
+  return request<Agent[]>("/agents");
+}
+
+export async function getAgent(id: number): Promise<Agent> {  return request<Agent>(`/agents/${id}`);
 }
 
 // ── 用户管理 ──────────────────────────────────────────────

@@ -81,7 +81,7 @@ function SkillsInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center">
+      <Stack direction="row" sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           自定义 Skill
         </Typography>
@@ -114,8 +114,8 @@ function SkillsInner() {
           {rows.map((s) => (
             <Card key={s.id}>
               <CardContent>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontWeight={700}>{s.name}</Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography sx={{ fontWeight: 700 }}>{s.name}</Typography>
                   {s.is_shared ? <Chip size="small" label="共享" /> : null}
                   <Chip
                     size="small"

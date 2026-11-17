@@ -90,7 +90,7 @@ function AgentsInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center" spacing={2}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           Agent
         </Typography>
@@ -120,8 +120,8 @@ function AgentsInner() {
             <Grid key={a.id} size={{ xs: 12, sm: 6, lg: 4 }}>
               <Card sx={{ height: "100%" }}>
                 <CardContent>
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ flexGrow: 1, noWrap: true }}>
+                  <Stack direction="row" spacing={1} sx={{alignItems: "center",  mb: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700, flexGrow: 1, whiteSpace: "nowrap" }}>
                       {a.name}
                     </Typography>
                     <StatusChip status={a.status} />

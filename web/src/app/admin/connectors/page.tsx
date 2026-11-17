@@ -105,7 +105,7 @@ function ConnectorsInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center">
+      <Stack direction="row" sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           连接器
         </Typography>
@@ -136,9 +136,9 @@ function ConnectorsInner() {
             return (
               <Card key={c.id}>
                 <CardContent>
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
                     <StatusDot state={rt?.state ?? "idle"} />
-                    <Typography fontWeight={700}>{c.name}</Typography>
+                    <Typography sx={{ fontWeight: 700 }}>{c.name}</Typography>
                     <Chip size="small" label={c.platform} variant="outlined" />
                     <Chip size="small" label={`Agent: ${c.agent_slug ?? c.agent_id}`} variant="outlined" />
                     <Chip

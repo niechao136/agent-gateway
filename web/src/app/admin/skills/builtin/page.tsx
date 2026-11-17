@@ -130,14 +130,14 @@ function BuiltinInner() {
           {rows.map((s) => (
             <Card key={s.name}>
               <CardContent>
-                <Stack direction="row" alignItems="center" spacing={2}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                   <Switch
                     checked={s.enabled}
                     onChange={(e) => void tryToggle(s, e.target.checked)}
                     disabled={!isAdmin}
                   />
                   <Box sx={{ flexGrow: 1 }}>
-                    <Typography fontWeight={700}>{s.name}</Typography>
+                    <Typography sx={{ fontWeight: 700 }}>{s.name}</Typography>
                     <Typography variant="caption" color="text.secondary">
                       {s.description || "（无描述）"}
                     </Typography>

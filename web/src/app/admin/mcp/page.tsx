@@ -143,7 +143,7 @@ function McpInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center">
+      <Stack direction="row" sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           MCP 服务器
         </Typography>
@@ -169,8 +169,8 @@ function McpInner() {
             <Grid key={s.id} size={{ xs: 12, sm: 6, lg: 4 }}>
               <Card>
                 <CardContent>
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ flexGrow: 1 }}>
+                  <Stack direction="row" spacing={1} sx={{alignItems: "center",  mb: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700,  flexGrow: 1 }}>
                       {s.name}
                     </Typography>
                     {s.is_shared ? <Chip size="small" label="共享" /> : null}

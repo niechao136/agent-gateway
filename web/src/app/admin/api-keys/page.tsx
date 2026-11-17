@@ -89,8 +89,8 @@ function ApiKeysInner() {
         groups.map(({ agent, keys }) => (
           <Card key={agent.id}>
             <CardContent>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                <Typography fontWeight={700}>{agent.name}</Typography>
+              <Stack direction="row" spacing={1} sx={{alignItems: "center",  mb: 1 }}>
+                <Typography sx={{ fontWeight: 700 }}>{agent.name}</Typography>
                 <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
                   {agent.slug}
                 </Typography>
@@ -113,7 +113,7 @@ function ApiKeysInner() {
                 </Typography>
               ) : (
                 keys.map((k) => (
-                  <Stack key={k.id} direction="row" spacing={1} alignItems="center" sx={{ py: 0.5 }}>
+                  <Stack key={k.id} direction="row" spacing={1} sx={{alignItems: "center",  py: 0.5 }}>
                     <Typography sx={{ width: 120 }}>{k.name}</Typography>
                     <Typography variant="caption" sx={{ fontFamily: "monospace", flexGrow: 1 }}>
                       {k.key_prefix}…

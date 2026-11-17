@@ -190,7 +190,7 @@ function EditInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" spacing={2} alignItems="center">
+      <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           {agent.name}
         </Typography>
@@ -255,7 +255,7 @@ function EditInner() {
         <Card>
           <CardContent>
             <Stack spacing={2}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                 <TextField
                   select
                   label="选择模型模板"
@@ -290,7 +290,7 @@ function EditInner() {
         <Card>
           <CardContent>
             <Stack spacing={1.5}>
-              <Stack direction="row" alignItems="center">
+              <Stack direction="row" sx={{ alignItems: "center" }}>
                 <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
                   已绑定 MCP 服务器
                 </Typography>
@@ -318,7 +318,7 @@ function EditInner() {
                       />
                     }
                     label={
-                      <Stack direction="row" spacing={1} alignItems="center">
+                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                         <ListItemText primary={m.name} secondary={m.transport} />
                         {m.is_shared ? <Chip size="small" label="共享" /> : null}
                       </Stack>
@@ -335,7 +335,7 @@ function EditInner() {
         <Card>
           <CardContent>
             <Stack spacing={2}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                 <TextField
                   label="新 Key 名称"
                   value={newKeyName}
@@ -368,7 +368,7 @@ function EditInner() {
 
               <Divider />
               {keys.map((k) => (
-                <Stack key={k.id} direction="row" spacing={1} alignItems="center">
+                <Stack key={k.id} direction="row" spacing={1} sx={{ alignItems: "center" }}>
                   <Typography sx={{ width: 140 }}>{k.name}</Typography>
                   <Typography variant="caption" sx={{ fontFamily: "monospace", flexGrow: 1 }}>
                     {k.key_prefix}…
@@ -444,7 +444,7 @@ function EditInner() {
                   value={newMcp.token}
                   onChange={(e) => setNewMcp({ ...newMcp, token: e.target.value })}
                 />
-                <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
                   <Button onClick={() => setNewMcpOpen(false)}>取消</Button>
                   <Button
                     variant="contained"

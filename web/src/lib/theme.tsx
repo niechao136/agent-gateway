@@ -13,7 +13,8 @@ import {
   ThemeProvider as MuiThemeProvider,
 } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
-import type { ColorScheme } from "@mui/material/styles";
+
+type Scheme = "light" | "dark";
 
 /**
  * ThemeRegistry（SPEC 10.3）：亮暗双主题 + 持久化 + 无闪烁。
@@ -49,7 +50,7 @@ function systemScheme(): Exclude<Mode, "system"> {
     : "light";
 }
 
-function buildTheme(scheme: ColorScheme) {
+function buildTheme(scheme: Scheme) {
   const dark = scheme === "dark";
   return createTheme({
     cssVariables: true,

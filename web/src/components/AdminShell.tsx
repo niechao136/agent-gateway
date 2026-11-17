@@ -77,9 +77,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const drawer = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Toolbar>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <SmartToyIcon color="primary" />
-          <Typography variant="subtitle1" fontWeight={700}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
             Agent Gateway
           </Typography>
         </Stack>
@@ -101,7 +101,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               sx={{ borderRadius: 2, mx: 1, mb: 0.5 }}
             >
               <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 14 }} />
+              <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14 } } }} />
             </ListItemButton>
           );
         })}
@@ -112,7 +112,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <ListItemIcon sx={{ minWidth: 40 }}>
             <ChatIcon />
           </ListItemIcon>
-          <ListItemText primary="对话" primaryTypographyProps={{ fontSize: 14 }} />
+          <ListItemText primary="对话" slotProps={{ primary: { sx: { fontSize: 14 } } }} />
         </ListItemButton>
       </List>
     </Box>
@@ -137,7 +137,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <MenuIcon />
             </IconButton>
           ) : null}
-          <Typography variant="h6" noWrap sx={{ flexGrow: 1, fontSize: 16 }}>
+          <Typography variant="h6" sx={{ whiteSpace: "nowrap", flexGrow: 1, fontSize: 16 }}>
             控制台
           </Typography>
           <Tooltip title={mode === "dark" ? "切换亮色" : "切换暗色"}>
@@ -146,7 +146,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </IconButton>
           </Tooltip>
           {user ? (
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ ml: 2 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center",  ml: 2 }}>
               <Typography variant="body2">{user.display_name || user.username}</Typography>
               <Chip
                 size="small"
@@ -173,7 +173,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <Drawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          PaperProps={{ sx: { width: DRAWER_WIDTH } }}
+          slotProps={{ paper: { sx: { width: DRAWER_WIDTH } } }}
         >
           {drawer}
         </Drawer>

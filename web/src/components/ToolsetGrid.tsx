@@ -103,7 +103,7 @@ export function ToolsetGrid({
 
   return (
     <Stack spacing={1.5}>
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
         <Typography variant="body2" color="text.secondary">
           场景预设：
         </Typography>
@@ -130,13 +130,13 @@ export function ToolsetGrid({
                 py: 1,
               }}
             >
-              <Stack direction="row" alignItems="center" spacing={1}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                 <Switch
                   size="small"
                   checked={on}
                   onChange={(e) => trySet(item, e.target.checked)}
                 />
-                <Typography variant="body2" fontWeight={600}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {item.name}
                 </Typography>
                 <Chip size="small" color={RISK_COLORS[risk]} label={risk} variant="outlined" />
@@ -157,7 +157,7 @@ export function ToolsetGrid({
                 </Button>
               </Stack>
               <Collapse in={expanded === item.name}>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ pt: 1 }}>
+                <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap",  pt: 1 }}>
                   {item.tools.map((t) => (
                     <Chip
                       key={t}

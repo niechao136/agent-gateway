@@ -112,7 +112,7 @@ const STATUS_COLORS: Record<string, string> = {
 export function StatusDot({ state, label }: { state: string; label?: string }) {
   const color = STATUS_COLORS[state] ?? "text.disabled";
   return (
-    <Stack direction="row" spacing={1} alignItems="center">
+    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
       <Box
         sx={{
           width: 10,

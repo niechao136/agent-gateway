@@ -103,7 +103,7 @@ function ModelsInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center">
+      <Stack direction="row" sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           模型模板
         </Typography>
@@ -136,8 +136,8 @@ function ModelsInner() {
           {rows.map((t) => (
             <Card key={t.id}>
               <CardContent>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontWeight={700}>{t.name}</Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography sx={{ fontWeight: 700 }}>{t.name}</Typography>
                   <Chip size="small" variant="outlined" label={t.model} />
                   <Chip size="small" variant="outlined" label={t.provider} />
                   {t.is_shared ? <Chip size="small" label="共享" /> : null}

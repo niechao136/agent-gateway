@@ -6,8 +6,7 @@ import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import MenuItem from "@mui/material/MenuItem";
 import Skeleton from "@mui/material/Skeleton";
-import Stack from "@mui/material/Stack";
-import Switch from "@mui/material/Switch";
+import Stack from "@mui/material/Stack";import Switch from "@mui/material/Switch";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -18,7 +17,7 @@ import Typography from "@mui/material/Typography";
 import { ApiError, listUsers, updateUser, type AdminUser, type Role } from "@/lib/api";
 import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
-import { ConfirmDialog } from "@/components/Common";
+import { ConfirmDialog, SkeletonList } from "@/components/Common";
 
 export default function AdminUsersPage() {
   return (
@@ -77,7 +76,7 @@ function UsersView() {
       {ok ? <Alert severity="success" onClose={() => setOk(null)}>{ok}</Alert> : null}
 
       {users === null ? (
-        <Skeleton rows={5} height={48} />
+        <SkeletonList rows={5} />
       ) : users.length === 0 ? (
         <Alert severity="info">还没有注册用户。</Alert>
       ) : (
@@ -97,7 +96,7 @@ function UsersView() {
             {users.map((u) => (
               <TableRow key={u.id} hover>
                 <TableCell>
-                  <Typography variant="body2" fontWeight={600}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {u.username}
                   </Typography>
                   {u.display_name && u.display_name !== u.username ? (
@@ -110,7 +109,7 @@ function UsersView() {
                   <Typography variant="caption">{u.email || "—"}</Typography>
                 </TableCell>
                 <TableCell>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                     <TextField
                       select
                       size="small"

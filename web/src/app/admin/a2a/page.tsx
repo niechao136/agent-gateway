@@ -126,7 +126,7 @@ function A2aInner() {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center">
+      <Stack direction="row" sx={{ alignItems: "center" }}>
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           A2A
         </Typography>
@@ -141,7 +141,7 @@ function A2aInner() {
       {/* 1. 入站状态 */}
       <Card>
         <CardContent>
-          <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+          <Stack direction="row" sx={{alignItems: "center",  mb: 1 }}>
             <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
               入站状态
             </Typography>
@@ -165,7 +165,7 @@ function A2aInner() {
               入站状态不可用（hermes 未运行或 A2A 未启用）。
             </Typography>
           ) : (
-            <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
               {Object.entries(inbound)
                 .filter(([k]) => !k.startsWith("_"))
                 .slice(0, 8)
@@ -197,8 +197,8 @@ function A2aInner() {
           {endpoints.map((e) => (
             <Card key={e.id}>
               <CardContent>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontWeight={700}>{e.name}</Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography sx={{ fontWeight: 700 }}>{e.name}</Typography>
                   {e.is_shared ? <Chip size="small" label="共享" /> : null}
                   <Chip
                     size="small"
