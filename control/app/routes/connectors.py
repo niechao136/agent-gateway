@@ -254,3 +254,59 @@ async def test_connector(
     """发一条测试消息到绑定 Agent，验证全链路（不真发平台消息）。"""
     c = await _conn_or_404(session, connector_id, user)
     return await registry.test(c)
+
+
+@router.get("/events")
+async def connector_events(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """SSE 推送连接器状态（批次 4 决策：SSE 而非轮询）。
+
+    每 3s 全量推一次当前用户可见连接器的运行状态快照；
+    客户端关闭时由 StreamingResponse 自动结束。
+    """
+    import asyncio
+    import json
+
+    from fastapi.responses import StreamingResponse
+
+    uid = user.id
+    is_admin = user.role == UserRole.ADMIN
+
+    async def gen():
+        while True:
+            try:
+                # 独立会话读 DB（长连接不能占用请求级 session）
+                from ..database import SessionLocal
+
+                async with SessionLocal() as s:
+                    stmt = select(Connector).order_by(Connector.id)
+                    if not is_admin:
+                        stmt = stmt.where(Connector.owner_id == uid)
+                    rows = (await s.execute(stmt)).scalars().all()
+                    out = []
+                    for c in rows:
+                        agent = (
+                            await s.execute(
+                                select(Agent).where(Agent.id == c.agent_id)
+                            )
+                        ).scalar_one_or_none()
+                        out.append(
+                            _out(
+                                c,
+                                agent.slug if agent else None,
+                                registry.status_of(c.id),
+                            )
+                        )
+                yield f"data: {json.dumps(out, ensure_ascii=False, default=str)}\n\n"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("SSE 推送失败: %s", exc)
+                yield f"event: error\ndata: {{\"detail\": \"推送失败\"}}\n\n"
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
