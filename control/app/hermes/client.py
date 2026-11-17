@@ -170,3 +170,15 @@ class DashboardClient:
     async def auth_providers(self) -> list[dict]:
         data = await self._request("GET", "/api/auth/providers")
         return data.get("providers", []) if isinstance(data, dict) else []
+
+    async def try_endpoint(self, method: str, path: str, **kw: Any) -> Any | None:
+        """探测性调用：端点不存在（404）时返回 None，其余错误抛 DashboardError。
+
+        用于「dashboard API 优先，无端点则降级直写」的模式。
+        """
+        try:
+            return await self._request(method, path, **kw)
+        except DashboardError as exc:
+            if "404" in str(exc):
+                return None
+            raise

@@ -24,6 +24,7 @@ from .routes import (
     agents,
     auth,
     chat,
+    mcp as mcp_routes,
     models as model_routes,
     users,
 )
@@ -97,6 +98,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(agents.router)          # /api/agents
 app.include_router(agents.chat_router)     # /api/chat/agents
+app.include_router(mcp_routes.router)      # /api/mcp
+app.include_router(mcp_routes.agent_router)  # /api/agents/{id}/mcp
 app.include_router(agent_skills.router)
 app.include_router(agent_a2a.router)
 app.include_router(agent_mcp.router)
