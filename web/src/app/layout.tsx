@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { ThemeProvider } from "@mui/material/styles";
-import CssBaseline from "@mui/material/CssBaseline";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
-import { theme } from "@/lib/theme";
+import { ThemeRegistry, InitColorSchemeScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "Agent Gateway",
@@ -12,13 +10,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>{InitColorSchemeScript}</head>
       <body>
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
-          <ThemeProvider theme={theme}>
-            <CssBaseline />
-            {children}
-          </ThemeProvider>
+          <ThemeRegistry>{children}</ThemeRegistry>
         </AppRouterCacheProvider>
       </body>
     </html>
