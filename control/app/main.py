@@ -20,6 +20,7 @@ from .routes import (
     a2a as a2a_routes,
     a2a_inbound,
     agents,
+    api_keys,
     auth,
     chat,
     mcp as mcp_routes,
@@ -27,6 +28,7 @@ from .routes import (
     skills as skill_routes,
     toolsets as toolset_routes,
     users,
+    v1 as v1_routes,
 )
 from .scheduler import CleanupTask
 from .security import hash_password
@@ -105,6 +107,8 @@ app.include_router(a2a_routes.agent_router)  # /api/agents/{id}/a2a
 app.include_router(skill_routes.router)    # /api/skills
 app.include_router(skill_routes.agent_router)  # /api/agents/{id}/skills
 app.include_router(toolset_routes.router)  # /api/toolsets
+app.include_router(api_keys.router)        # /api/agents/{id}/api-keys
+app.include_router(v1_routes.router)       # /api/v1（对外，agk 鉴权）
 app.include_router(model_routes.router)    # /api/models
 app.include_router(a2a_inbound.router)     # /api/a2a/inbound
 app.include_router(users.router)           # /api/admin/users

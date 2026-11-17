@@ -290,6 +290,66 @@ class BuiltinSkillState(Base):
     )
 
 
+# ── 批次 3：对外 API ──────────────────────────────────────
+class AgentAPIKey(Base):
+    """对外 API Key：按 Agent 隔离（SPEC-v2 决策）。
+
+    - 手动生成（用户拍板）：创建 Agent 不自动发 Key
+    - key_hash = SHA-256(明文)；DB 泄露不暴露 Key
+    - key_prefix = "agk_" + 前 8 位，列表展示用
+    - 明文仅创建响应返回一次（用户拍板）
+    """
+
+    __tablename__ = "agent_api_keys"
+    __table_args__ = (
+        Index("ix_apikey_agent_name", "agent_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(16))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+# ── 批次 3：连接器 ────────────────────────────────────────
+class Connector(Base):
+    """平台连接器：一个连接器绑定一个 Agent，长连接收发消息。
+
+    credentials 存平台 SDK 需要的 token/secret（接口返回脱敏）。
+    """
+
+    __tablename__ = "connectors"
+    __table_args__ = (
+        Index("ix_connector_owner_name", "owner_id", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    # telegram | feishu | slack
+    platform: Mapped[str] = mapped_column(String(24))
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    credentials: Mapped[dict] = mapped_column(JSON)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class A2AEndpoint(Base):
     """A2A 出站端点：定义在控制层，下发到 profile 的 config.yaml。
 

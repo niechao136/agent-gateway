@@ -36,12 +36,13 @@ class ConversationNotFound(ConversationError):
     """会话不存在或不属于该用户（不区分，避免探测）。"""
 
 
-def new_session_id(user_id: int) -> str:
+def new_session_id(user_id: int, prefix: str = "u") -> str:
     """生成 hermes session id。
 
-    带用户前缀便于运维排查；随机部分防止猜测。
+    带来源前缀便于运维排查（u=用户会话；v1=对外API；tg/fs/slack=连接器）；
+    随机部分防止猜测。
     """
-    return f"ag_u{user_id}_{secrets.token_hex(8)}"
+    return f"ag_{prefix}{user_id}_{secrets.token_hex(8)}"
 
 
 def derive_title(message: str, limit: int = 40) -> str:
@@ -133,6 +134,47 @@ async def create_conversation(
     except Exception:
         await session.rollback()
         # DB 失败 → 回滚 hermes 侧，避免孤儿 session
+        try:
+            async with GatewayClient() as gw2:
+                await gw2.delete_session(sid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("回滚 hermes session %s 失败: %s", sid, exc)
+        raise
+    await session.refresh(conv)
+    return conv
+
+
+async def create_conversation_for_agent(
+    session: AsyncSession,
+    *,
+    agent: Agent,
+    source: str = "v1",
+) -> Conversation:
+    """为 Agent 创建会话，不关联登录用户（对外 API / 连接器用，批次 3）。
+
+    user_id 存 0 表示系统来源；title 带来源前缀避免与用户会话混淆。
+    hermes 侧同样不传 title（全局唯一约束，见 create_conversation 注释）。
+    """
+    sid = new_session_id(0, prefix=source)
+
+    async with GatewayClient() as gw:
+        try:
+            await gw.create_session(sid)
+        except GatewayError as exc:
+            raise ConversationError(f"创建 hermes 会话失败: {exc}") from exc
+
+    conv = Conversation(
+        user_id=0,
+        agent_id=agent.id,
+        hermes_session_id=sid,
+        title=f"[{source}] {agent.slug}",
+        last_active_at=datetime.now(UTC),
+    )
+    session.add(conv)
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
         try:
             async with GatewayClient() as gw2:
                 await gw2.delete_session(sid)

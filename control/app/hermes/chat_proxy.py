@@ -219,3 +219,32 @@ async def translate_stream(
         logger.exception("流式翻译失败")
         detail = f"对话处理失败: {exc}"[:200] if not emitted_any_token else "对话处理失败"
         yield sse("error", {"detail": detail})
+
+
+def extract_text_and_usage(frame: bytes) -> tuple[str, dict | None]:
+    """从翻译管道产出的单个 SSE 帧提取 (文本, usage)。
+
+    供非流式聚合（/api/v1 messages、连接器）使用：
+    - token / done 帧 → 累积文本
+    - usage 目前 hermes 未提供，返回 None（占位，字段对未来兼容）
+    """
+    try:
+        block = frame.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return "", None
+
+    event_name, data = parse_sse_block(block)
+    if data is None:
+        return "", None
+    try:
+        obj = json.loads(data)
+    except json.JSONDecodeError:
+        return "", None
+    if not isinstance(obj, dict):
+        return "", None
+
+    ev = (event_name or "").lower()
+    if ev == "token":
+        t = obj.get("content")
+        return (t, None) if isinstance(t, str) else ("", None)
+    return "", None
