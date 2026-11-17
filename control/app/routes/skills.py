@@ -1,0 +1,480 @@
+"""Skill 双来源（SPEC-v2 批次 2）：
+
+- 内置 Skill：只读代理 hermes dashboard API（GET /api/skills）+
+  级联禁用（先 409 列出受影响 Agent，确认后逐个 toggle）
+- 自定义 Skill：控制层 CRUD + Agent 绑定 + 直写 profile skills/ 目录
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import get_settings
+from ..database import get_session
+from ..hermes.skill_sync import SkillSyncError, apply_custom_skills, remove_skill_dir
+from ..hermes.skills import SkillError, list_skills, toggle_skill
+from ..models import (
+    Agent,
+    AgentCustomSkill,
+    BuiltinSkillState,
+    CustomSkill,
+    UserRole,
+)
+from ..security import CurrentUser, can_modify
+
+logger = logging.getLogger(__name__)
+_settings = get_settings()
+
+router = APIRouter(prefix="/api/skills", tags=["skills"])
+agent_router = APIRouter(prefix="/api/agents", tags=["agent-skills"])
+
+
+# ── 内置 Skill（只读代理 + 级联禁用）───────────────────────
+class BuiltinSkillOut(BaseModel):
+    name: str
+    description: str | None = None
+    enabled: bool = True
+    used_by_agents: list[int] = []
+
+
+class BuiltinToggleIn(BaseModel):
+    enabled: bool
+    affected_agent_ids: list[int] = []  # 确认级联时要禁用的 Agent 列表
+
+
+@router.get("/builtin", response_model=list[BuiltinSkillOut])
+async def list_builtin(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    profile: str | None = None,
+) -> list[BuiltinSkillOut]:
+    """聚合 hermes dashboard 的 skill 列表 + 控制层启停状态 + 使用中的 Agent。"""
+    try:
+        raw = await list_skills(profile or "default")
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    states = {
+        s.name: s.enabled
+        for s in (
+            await session.execute(select(BuiltinSkillState))
+        ).scalars().all()
+    }
+    # 使用中：绑定了任一自定义技能无关；内置技能无法精确知道 Agent 使用情况，
+    # 用"该 Agent 上次 toggle 的记录"近似——控制层只存全局状态，用于级联提示
+    out: list[BuiltinSkillOut] = []
+    for s in raw:
+        name = s.get("name") or ""
+        if not name:
+            continue
+        out.append(
+            BuiltinSkillOut(
+                name=name,
+                description=s.get("description"),
+                enabled=states.get(name, bool(s.get("enabled", True))),
+            )
+        )
+    return out
+
+
+@router.put("/builtin/{name}")
+async def toggle_builtin(
+    name: str,
+    body: BuiltinToggleIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """内置技能全局启停。
+
+    - 传 enabled=False 且未确认 affected_agent_ids 时：
+      若有 Agent 绑定了该技能（无法精确探测，控制层以 409 提示确认），返回 409
+    - 确认后：逐个对 affected Agent profile 调 hermes toggle + 记录全局状态
+    """
+    if not user or user.role != UserRole.ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "内置技能启停需要管理员")
+
+    if not body.enabled and not body.affected_agent_ids:
+        # 级联确认：内置技能是全局资源，禁用影响所有 Agent
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "message": "禁用内置技能会影响使用它的 Agent，请确认受影响列表",
+                "requires_confirmation": True,
+            },
+        )
+
+    results: list[dict] = []
+    errors: list[str] = []
+    for aid in body.affected_agent_ids:
+        agent = (
+            await session.execute(select(Agent).where(Agent.id == aid))
+        ).scalar_one_or_none()
+        if agent is None:
+            errors.append(f"Agent {aid} 不存在")
+            continue
+        try:
+            await toggle_skill(agent.profile_name, name, body.enabled)
+            results.append({"agent_id": aid, "ok": True})
+        except SkillError as exc:
+            errors.append(f"Agent {aid}: {exc}")
+            results.append({"agent_id": aid, "ok": False, "error": str(exc)})
+
+    # 记录全局状态
+    st = (
+        await session.execute(
+            select(BuiltinSkillState).where(BuiltinSkillState.name == name)
+        )
+    ).scalar_one_or_none()
+    if st is None:
+        st = BuiltinSkillState(name=name, enabled=body.enabled)
+        session.add(st)
+    else:
+        st.enabled = body.enabled
+    await session.commit()
+
+    return {
+        "name": name,
+        "enabled": body.enabled,
+        "agents": results,
+        "errors": errors,
+    }
+
+
+# ── 自定义 Skill CRUD ─────────────────────────────────────
+class SkillIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = None
+    content: str = Field(min_length=1)
+    files: dict[str, str] | None = None
+    is_shared: bool = False
+
+
+class SkillUpdateIn(BaseModel):
+    description: str | None = None
+    content: str | None = None
+    files: dict[str, str] | None = None
+    is_shared: bool | None = None
+
+
+class SkillOut(BaseModel):
+    id: int
+    name: str
+    owner_id: int
+    description: str | None
+    is_shared: bool
+    bound_agents: list[int] = []
+
+
+def _out(s: CustomSkill, bound: list[int] | None = None) -> SkillOut:
+    return SkillOut(
+        id=s.id,
+        name=s.name,
+        owner_id=s.owner_id,
+        description=s.description,
+        is_shared=s.is_shared,
+        bound_agents=bound or [],
+    )
+
+
+@router.get("", response_model=list[SkillOut])
+async def list_skills_route(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[SkillOut]:
+    if user.role == UserRole.ADMIN:
+        stmt = select(CustomSkill).order_by(CustomSkill.id)
+    else:
+        stmt = select(CustomSkill).where(
+            or_(CustomSkill.owner_id == user.id, CustomSkill.is_shared == True)  # noqa: E712
+        ).order_by(CustomSkill.id)
+    rows = (await session.execute(stmt)).scalars().all()
+
+    bindings = (
+        await session.execute(select(AgentCustomSkill))
+    ).scalars().all()
+    by_skill: dict[int, list[int]] = {}
+    for b in bindings:
+        by_skill.setdefault(b.skill_id, []).append(b.agent_id)
+    return [_out(s, by_skill.get(s.id, [])) for s in rows]
+
+
+@router.post("", response_model=SkillOut, status_code=201)
+async def create_skill(
+    body: SkillIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SkillOut:
+    exists = (
+        await session.execute(
+            select(CustomSkill).where(
+                CustomSkill.owner_id == user.id, CustomSkill.name == body.name
+            )
+        )
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "同名技能已存在")
+
+    s = CustomSkill(
+        owner_id=user.id,
+        name=body.name,
+        description=body.description,
+        content=body.content,
+        files=body.files,
+        is_shared=body.is_shared and user.role == UserRole.ADMIN,
+    )
+    session.add(s)
+    await session.commit()
+    await session.refresh(s)
+    return _out(s)
+
+
+async def _skill_or_404(session: AsyncSession, skill_id: int, user) -> CustomSkill:
+    s = (
+        await session.execute(select(CustomSkill).where(CustomSkill.id == skill_id))
+    ).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "技能不存在")
+    if not can_modify(user, s.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的技能")
+    return s
+
+
+@router.patch("/{skill_id}", response_model=SkillOut)
+async def update_skill(
+    skill_id: int,
+    body: SkillUpdateIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SkillOut:
+    s = await _skill_or_404(session, skill_id, user)
+    for field in ("description", "content", "files"):
+        v = getattr(body, field)
+        if v is not None:
+            setattr(s, field, v)
+    if body.is_shared is not None:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "共享/取消共享需要管理员")
+        s.is_shared = body.is_shared
+    await session.commit()
+    await session.refresh(s)
+
+    # 内容变更 → 同步所有绑定 profile
+    await _sync_bound_agents(session, s)
+    return _out(s)
+
+
+@router.delete("/{skill_id}", status_code=204)
+async def delete_skill(
+    skill_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    force: bool = False,
+) -> None:
+    s = await _skill_or_404(session, skill_id, user)
+    bound = (
+        await session.execute(
+            select(AgentCustomSkill).where(AgentCustomSkill.skill_id == skill_id)
+        )
+    ).scalars().all()
+    if bound and not force:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"该技能仍被 {len(bound)} 个 Agent 绑定；传 ?force=true 确认删除并解绑",
+        )
+    agent_ids = [b.agent_id for b in bound]
+    for b in bound:
+        await session.delete(b)
+    await session.flush()
+
+    # 删 profile 里的目录
+    for aid in agent_ids:
+        agent = (
+            await session.execute(select(Agent).where(Agent.id == aid))
+        ).scalar_one_or_none()
+        if agent is not None:
+            try:
+                remove_skill_dir(agent.profile_name, _settings.hermes_data_root, s.name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("删除技能目录失败: %s", exc)
+
+    await session.delete(s)
+    await session.commit()
+
+
+# ── Agent 绑定（自定义技能）────────────────────────────────
+@agent_router.get("/{agent_id}/skills")
+async def list_agent_skills(
+    agent_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    rows = (
+        await session.execute(
+            select(CustomSkill)
+            .join(AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id)
+            .where(AgentCustomSkill.agent_id == agent_id)
+        )
+    ).scalars().all()
+    return {
+        "agent_id": agent_id,
+        "profile": agent.profile_name,
+        "bound": [_out(s) for s in rows],
+    }
+
+
+@agent_router.put("/{agent_id}/skills")
+async def set_agent_skills(
+    agent_id: int,
+    body: dict,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """body = {"skill_ids": [...]}。整体替换绑定并同步 profile。"""
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    ids = body.get("skill_ids")
+    if not isinstance(ids, list):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "skill_ids 必须是数组")
+
+    skills: list[CustomSkill] = []
+    for sid in ids:
+        s = (
+            await session.execute(select(CustomSkill).where(CustomSkill.id == sid))
+        ).scalar_one_or_none()
+        if s is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"技能 {sid} 不存在")
+        if s.owner_id != user.id and not s.is_shared:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"技能 {s.name} 不可绑定（非本人且未共享）")
+        skills.append(s)
+
+    old = (
+        await session.execute(
+            select(AgentCustomSkill).where(AgentCustomSkill.agent_id == agent_id)
+        )
+    ).scalars().all()
+    for b in old:
+        await session.delete(b)
+    for s in skills:
+        session.add(AgentCustomSkill(agent_id=agent_id, skill_id=s.id))
+    await session.flush()
+
+    res = _apply_profile(agent, skills)
+    await session.commit()
+    return {"bound": len(skills), "sync": res}
+
+
+@agent_router.post("/{agent_id}/skills/create-and-bind", status_code=201)
+async def create_and_bind_skill(
+    agent_id: int,
+    body: SkillIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    exists = (
+        await session.execute(
+            select(CustomSkill).where(
+                CustomSkill.owner_id == user.id, CustomSkill.name == body.name
+            )
+        )
+    ).scalar_one_or_none()
+    if exists is not None:
+        s = exists
+        created = False
+    else:
+        s = CustomSkill(
+            owner_id=user.id,
+            name=body.name,
+            description=body.description,
+            content=body.content,
+            files=body.files,
+            is_shared=body.is_shared and user.role == UserRole.ADMIN,
+        )
+        session.add(s)
+        await session.flush()
+        created = True
+
+    dup = (
+        await session.execute(
+            select(AgentCustomSkill).where(
+                AgentCustomSkill.agent_id == agent_id, AgentCustomSkill.skill_id == s.id
+            )
+        )
+    ).scalar_one_or_none()
+    if dup is None:
+        session.add(AgentCustomSkill(agent_id=agent_id, skill_id=s.id))
+        await session.flush()
+
+    # 重新取全量绑定再同步
+    bound = list(
+        (
+            await session.execute(
+                select(CustomSkill)
+                .join(AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id)
+                .where(AgentCustomSkill.agent_id == agent_id)
+            )
+        ).scalars().all()
+    )
+    res = _apply_profile(agent, bound)
+    await session.commit()
+    return {"created": created, "skill": _out(s).model_dump(), "sync": res}
+
+
+# ── 同步 ──────────────────────────────────────────────────
+def _apply_profile(agent: Agent, skills: list[CustomSkill]) -> dict:
+    try:
+        return apply_custom_skills(agent.profile_name, _settings.hermes_data_root, skills)
+    except (SkillSyncError, OSError) as exc:
+        logger.warning("自定义技能同步失败（agent=%s）：%s", agent.slug, exc)
+        return {"ok": False, "error": str(exc)}
+
+
+async def _sync_bound_agents(session: AsyncSession, s: CustomSkill) -> None:
+    rows = (
+        await session.execute(
+            select(AgentCustomSkill).where(AgentCustomSkill.skill_id == s.id)
+        )
+    ).scalars().all()
+    for b in rows:
+        agent = (
+            await session.execute(select(Agent).where(Agent.id == b.agent_id))
+        ).scalar_one_or_none()
+        if agent is None:
+            continue
+        bound = list(
+            (
+                await session.execute(
+                    select(CustomSkill)
+                    .join(AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id)
+                    .where(AgentCustomSkill.agent_id == agent.id)
+                )
+            ).scalars().all()
+        )
+        _apply_profile(agent, bound)

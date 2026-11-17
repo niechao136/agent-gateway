@@ -26,6 +26,8 @@ from .routes import (
     chat,
     mcp as mcp_routes,
     models as model_routes,
+    skills as skill_routes,
+    toolsets as toolset_routes,
     users,
 )
 from .scheduler import CleanupTask
@@ -102,6 +104,9 @@ app.include_router(mcp_routes.router)      # /api/mcp
 app.include_router(mcp_routes.agent_router)  # /api/agents/{id}/mcp
 app.include_router(a2a_routes.router)      # /api/a2a/endpoints
 app.include_router(a2a_routes.agent_router)  # /api/agents/{id}/a2a
+app.include_router(skill_routes.router)    # /api/skills
+app.include_router(skill_routes.agent_router)  # /api/agents/{id}/skills
+app.include_router(toolset_routes.router)  # /api/toolsets
 app.include_router(agent_skills.router)
 app.include_router(agent_a2a.router)
 app.include_router(agent_mcp.router)
