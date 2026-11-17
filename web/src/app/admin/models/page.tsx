@@ -11,6 +11,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
@@ -38,6 +39,17 @@ interface Form {
   description: string;
   is_shared: boolean;
 }
+
+// hermes 常见 provider；custom 用于 OpenAI 兼容端点（见 models_cfg.py 实测）
+const PROVIDERS = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "openrouter",
+  "deepseek",
+  "ollama",
+  "custom",
+];
 
 const EMPTY: Form = {
   name: "",
@@ -195,10 +207,18 @@ function ModelsInner() {
               placeholder="gemini-2.5-flash"
             />
             <TextField
+              select
               label="Provider"
               value={form.provider}
               onChange={(e) => setForm({ ...form, provider: e.target.value })}
-            />
+              helperText="custom 用于 OpenAI 兼容端点（配 Base URL）"
+            >
+              {PROVIDERS.map((p) => (
+                <MenuItem key={p} value={p}>
+                  {p}
+                </MenuItem>
+              ))}
+            </TextField>
             <TextField
               label="Base URL（可选）"
               value={form.base_url}

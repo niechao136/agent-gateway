@@ -25,19 +25,28 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import {
   ApiError,
   applyModelTemplate,
+  bindAgentSkills,
   createAgentAPIKey,
+  createAndBindA2A,
   createAndBindMCP,
   deleteAgentAPIKey,
   getAgent,
+  getAgentA2A,
   getAgentMCP,
+  listA2AEndpoints,
   listAgentAPIKeys,
+  listAgentSkillBindings,
   listMCPServers,
   listModelTemplates,
+  listSkills,
+  setAgentA2A,
   setAgentMCP,
   updateAgent,
   updateAgentAPIKey,
+  type A2AEndpoint,
   type Agent,
   type AgentAPIKey,
+  type CustomSkill,
   type MCPServer,
   type ModelTemplate,
 } from "@/lib/api";
@@ -73,6 +82,16 @@ function EditInner() {
   const [newMcpOpen, setNewMcpOpen] = useState(false);
   const [newMcp, setNewMcp] = useState({ name: "", url: "", token: "" });
 
+  // Skill 绑定
+  const [skillsAll, setSkillsAll] = useState<CustomSkill[]>([]);
+  const [skillBound, setSkillBound] = useState<number[]>([]);
+
+  // A2A 绑定
+  const [a2aAll, setA2aAll] = useState<A2AEndpoint[]>([]);
+  const [a2aBound, setA2aBound] = useState<number[]>([]);
+  const [newA2aOpen, setNewA2aOpen] = useState(false);
+  const [newA2a, setNewA2a] = useState({ name: "", url: "", token: "" });
+
   // API Key
   const [keys, setKeys] = useState<AgentAPIKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
@@ -85,16 +104,24 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, mcp, bind, ks] = await Promise.all([
+      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind] = await Promise.all([
         listModelTemplates().catch(() => []),
         listMCPServers().catch(() => []),
         getAgentMCP(id).catch(() => ({ bound: [] as MCPServer[] })),
         listAgentAPIKeys(id).catch(() => []),
+        listSkills().catch(() => []),
+        listAgentSkillBindings(id).catch(() => ({ bound: [] as CustomSkill[] })),
+        listA2AEndpoints().catch(() => []),
+        getAgentA2A(id).catch(() => ({ bound: [] as A2AEndpoint[] })),
       ]);
       setTemplates(tpl);
       setMcpAll(mcp);
       setMcpBound((bind.bound ?? []).map((m) => m.id));
       setKeys(ks);
+      setSkillsAll(skAll);
+      setSkillBound((skBind.bound ?? []).map((s) => s.id));
+      setA2aAll(a2aAllR);
+      setA2aBound((a2aBind.bound ?? []).map((e) => e.id));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
     }
@@ -168,6 +195,46 @@ function EditInner() {
     }
   }
 
+  async function saveSkills(ids: number[]) {
+    try {
+      await bindAgentSkills(id, ids);
+      setSkillBound(ids);
+      setOk("Skill 绑定已同步到 profile");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "绑定失败");
+    }
+  }
+
+  async function saveA2a(ids: number[]) {
+    try {
+      await setAgentA2A(id, ids);
+      setA2aBound(ids);
+      setOk("A2A 端点绑定已同步到 profile");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "绑定失败");
+    }
+  }
+
+  async function createAndBindA2a() {
+    setBusy(true);
+    try {
+      const r = await createAndBindA2A(id, {
+        name: newA2a.name.trim(),
+        url: newA2a.url.trim(),
+        auth_type: newA2a.token ? "bearer" : "none",
+        token: newA2a.token || undefined,
+      });
+      setNewA2aOpen(false);
+      setNewA2a({ name: "", url: "", token: "" });
+      await load();
+      setOk(r.created ? "已新建并绑定 A2A 端点" : "已绑定已存在的端点");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "新建并绑定失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addKey() {
     if (!newKeyName.trim()) return;
     try {
@@ -209,6 +276,8 @@ function EditInner() {
         <Tab label="工具" />
         <Tab label="模型" />
         <Tab label="MCP" />
+        <Tab label="Skill" />
+        <Tab label="A2A" />
         <Tab label="API 密钥" />
       </Tabs>
 
@@ -334,6 +403,93 @@ function EditInner() {
       {tab === 4 && (
         <Card>
           <CardContent>
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle1">已绑定的自定义 Skill</Typography>
+              {skillsAll.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  还没有自定义 Skill。请到「自定义 Skill」页创建后再回来绑定。
+                </Typography>
+              ) : (
+                skillsAll.map((sk) => (
+                  <FormControlLabel
+                    key={sk.id}
+                    control={
+                      <Checkbox
+                        checked={skillBound.includes(sk.id)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...skillBound, sk.id]
+                            : skillBound.filter((x) => x !== sk.id);
+                          void saveSkills(next);
+                        }}
+                      />
+                    }
+                    label={
+                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <ListItemText primary={sk.name} secondary={sk.description ?? ""} />
+                        {sk.is_shared ? <Chip size="small" label="共享" /> : null}
+                      </Stack>
+                    }
+                  />
+                ))
+              )}
+              <Typography variant="caption" color="text.secondary">
+                绑定后 Skill 写入该 Agent 的 profile（含 references/scripts/templates/assets）。
+                内置 Skill 的启停在「内置 Skill」页管理。
+              </Typography>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 5 && (
+        <Card>
+          <CardContent>
+            <Stack spacing={1.5}>
+              <Stack direction="row" sx={{ alignItems: "center" }}>
+                <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                  已绑定的 A2A 出站端点
+                </Typography>
+                <Button startIcon={<AddIcon />} onClick={() => setNewA2aOpen(true)}>
+                  新建并绑定
+                </Button>
+              </Stack>
+              {a2aAll.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  还没有 A2A 出站端点，点「新建并绑定」创建第一个。
+                </Typography>
+              ) : (
+                a2aAll.map((ep) => (
+                  <FormControlLabel
+                    key={ep.id}
+                    control={
+                      <Checkbox
+                        checked={a2aBound.includes(ep.id)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...a2aBound, ep.id]
+                            : a2aBound.filter((x) => x !== ep.id);
+                          void saveA2a(next);
+                        }}
+                      />
+                    }
+                    label={
+                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <ListItemText primary={ep.name} secondary={ep.url} />
+                        {ep.is_shared ? <Chip size="small" label="共享" /> : null}
+                      </Stack>
+                    }
+                  />
+                ))
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 6 && (
+        <Card>
+          <CardContent>
             <Stack spacing={2}>
               <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                 <TextField
@@ -450,6 +606,56 @@ function EditInner() {
                     variant="contained"
                     disabled={busy || !newMcp.name.trim() || !newMcp.url.trim()}
                     onClick={() => void createAndBindMcp()}
+                  >
+                    创建并绑定
+                  </Button>
+                </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Box>
+      ) : null}
+
+      {/* 新建并绑定 A2A 端点 */}
+      {newA2aOpen ? (
+        <Box
+          sx={{
+            position: "fixed",
+            inset: 0,
+            bgcolor: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1300,
+          }}
+          onClick={() => setNewA2aOpen(false)}
+        >
+          <Card sx={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
+            <CardContent>
+              <Stack spacing={2}>
+                <Typography variant="h6">新建并绑定 A2A 端点</Typography>
+                <TextField
+                  label="名称"
+                  value={newA2a.name}
+                  onChange={(e) => setNewA2a({ ...newA2a, name: e.target.value })}
+                />
+                <TextField
+                  label="URL"
+                  value={newA2a.url}
+                  onChange={(e) => setNewA2a({ ...newA2a, url: e.target.value })}
+                  placeholder="http://host:port"
+                />
+                <TextField
+                  label="Bearer Token（可选）"
+                  value={newA2a.token}
+                  onChange={(e) => setNewA2a({ ...newA2a, token: e.target.value })}
+                />
+                <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
+                  <Button onClick={() => setNewA2aOpen(false)}>取消</Button>
+                  <Button
+                    variant="contained"
+                    disabled={busy || !newA2a.name.trim() || !newA2a.url.trim()}
+                    onClick={() => void createAndBindA2a()}
                   >
                     创建并绑定
                   </Button>

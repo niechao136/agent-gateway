@@ -171,6 +171,11 @@ class SkillOut(BaseModel):
     bound_agents: list[int] = []
 
 
+class SkillDetailOut(SkillOut):
+    content: str
+    files: dict[str, str] | None = None
+
+
 def _out(s: CustomSkill, bound: list[int] | None = None) -> SkillOut:
     return SkillOut(
         id=s.id,
@@ -179,6 +184,27 @@ def _out(s: CustomSkill, bound: list[int] | None = None) -> SkillOut:
         description=s.description,
         is_shared=s.is_shared,
         bound_agents=bound or [],
+    )
+
+
+@router.get("/{skill_id}", response_model=SkillDetailOut)
+async def get_skill(
+    skill_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SkillDetailOut:
+    """技能详情（含正文与 files），用于编辑回填。"""
+    s = (
+        await session.execute(select(CustomSkill).where(CustomSkill.id == skill_id))
+    ).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "技能不存在")
+    if s.owner_id != user.id and not s.is_shared:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权查看他人的技能正文")
+    return SkillDetailOut(
+        **_out(s).model_dump(),
+        content=s.content,
+        files=s.files,
     )
 
 
@@ -450,7 +476,12 @@ async def create_and_bind_skill(
 # ── 同步 ──────────────────────────────────────────────────
 def _apply_profile(agent: Agent, skills: list[CustomSkill]) -> dict:
     try:
-        return apply_custom_skills(agent.profile_name, _settings.hermes_data_root, skills)
+        return apply_custom_skills(
+            agent.profile_name,
+            _settings.hermes_data_root,
+            skills,
+            disabled_toolsets=list(agent.disabled_toolsets or []),
+        )
     except (SkillSyncError, OSError) as exc:
         logger.warning("自定义技能同步失败（agent=%s）：%s", agent.slug, exc)
         return {"ok": False, "error": str(exc)}

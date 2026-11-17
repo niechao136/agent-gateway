@@ -267,25 +267,70 @@ async def test_server(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
-    """连通性测试：走 hermes dashboard 的 mcp test 端点（有则用），无则回显配置检查结果。"""
-    s = await _server_or_404(session, server_id, user)
-    # dashboard 是否有该端点由 hermes 版本决定：有则转发，404 时降级为静态配置校验
-    from ..hermes.client import DashboardClient, DashboardError
+    """连通性测试：dashboard 有对应端点则转发；否则本地校验 + 实际连接探测。
 
+    注意：多数 hermes 版本没有 /api/mcp/{name}/test 端点，且可能返回 405/500 而非
+    404。因此任何 dashboard 探测异常都降级为本地校验，绝不让"测试"因 dashboard
+    本身的问题而误报失败（修复：新增 MCP 后测试失败）。
+    """
+    s = await _server_or_404(session, server_id, user)
+    from ..hermes.client import DashboardClient
+
+    # 1) 先构建配置校验（字段名/auth_type 是否合法）
+    try:
+        build_entry_check(s)
+    except MCPSyncError as e:
+        return {"ok": False, "source": "static-check", "error": str(e)}
+
+    # 2) dashboard 端点探测（best-effort，成功才用其结果）
     try:
         async with DashboardClient() as client:
             res = await client.try_endpoint("POST", f"/api/mcp/{s.name}/test")
-            if res is not None:
-                return {"ok": True, "source": "dashboard", **(res if isinstance(res, dict) else {})}
-    except DashboardError as exc:
-        # dashboard 可达但调用失败：如实返回
-        return {"ok": False, "source": "dashboard", "error": str(exc)}
-    # 降级：静态配置校验
+            if isinstance(res, dict) and res.get("ok"):
+                return {"ok": True, "source": "dashboard", **res}
+    except Exception:  # noqa: BLE001 - dashboard 不可用/无端点都属正常
+        pass
+
+    # 3) 本地实际连接探测
+    ok, detail = await _probe_connection(s)
+    return {"ok": ok, "source": "local-probe", "detail": detail}
+
+
+async def _probe_connection(s: MCPServer) -> tuple[bool, str]:
+    """按 transport 做轻量连通性探测。
+
+    - http 系：TCP 连接 host:port（不发业务请求，避免触发副作用）
+    - stdio：确认 command 可执行（shutil.which）
+    """
+    import asyncio
+    import shutil
+    from urllib.parse import urlparse
+
+    if s.transport == "stdio":
+        cmd = (s.command or "").split()[0] if s.command else ""
+        if not cmd:
+            return False, "未配置启动命令"
+        if shutil.which(cmd):
+            return True, f"可执行文件已找到: {cmd}"
+        return False, f"命令不在 PATH 中: {cmd}"
+
+    url = s.url or ""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, f"URL 协议不支持: {parsed.scheme or '(空)'}"
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        return False, "URL 缺少主机名"
     try:
-        build_entry_check(s)
-        return {"ok": True, "source": "static-check"}
-    except MCPSyncError as e:
-        return {"ok": False, "source": "static-check", "error": str(e)}
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=5
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True, f"可连接 {host}:{port}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"无法连接 {host}:{port}: {exc}"
 
 
 def build_entry_check(s: MCPServer) -> None:

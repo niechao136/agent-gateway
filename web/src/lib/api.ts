@@ -251,6 +251,15 @@ export async function listSkills(): Promise<CustomSkill[]> {
   return request<CustomSkill[]>("/skills");
 }
 
+export interface SkillDetail extends CustomSkill {
+  content: string;
+  files: Record<string, string> | null;
+}
+
+export async function getSkill(id: number): Promise<SkillDetail> {
+  return request<SkillDetail>(`/skills/${id}`);
+}
+
 export async function createSkill(body: {
   name: string;
   description?: string;

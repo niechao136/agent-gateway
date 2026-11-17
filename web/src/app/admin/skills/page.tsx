@@ -10,14 +10,17 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
+import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
 import {
   ApiError,
   createSkill,
   deleteSkill,
+  getSkill,
   listSkills,
   updateSkill,
   type CustomSkill,
@@ -36,6 +39,15 @@ const TEMPLATE = `# 技能名称
 2. 第二步
 `;
 
+// 文件类别（对应 hermes skill 目录结构与 SPEC 6.2）
+const FILE_DIRS = ["references", "scripts", "templates", "assets"] as const;
+type FileDir = (typeof FILE_DIRS)[number];
+
+interface SkillFile {
+  path: string; // 如 references/api.md / scripts/run.py
+  content: string;
+}
+
 function SkillsInner() {
   const [rows, setRows] = useState<CustomSkill[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +55,9 @@ function SkillsInner() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CustomSkill | null>(null);
   const [form, setForm] = useState({ name: "", description: "", content: TEMPLATE });
+  const [files, setFiles] = useState<SkillFile[]>([]);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -57,25 +71,60 @@ function SkillsInner() {
     void load();
   }, [load]);
 
-  async function submit() {
+  function openCreate() {
+    setEditing(null);
+    setForm({ name: "", description: "", content: TEMPLATE });
+    setFiles([]);
+    setOpen(true);
+  }
+
+  async function openEdit(s: CustomSkill) {
     try {
+      const detail = await getSkill(s.id); // 回填正文与文件
+      setEditing(s);
+      setForm({ name: s.name, description: s.description ?? "", content: detail.content });
+      setFiles(
+        Object.entries(detail.files ?? {}).map(([path, content]) => ({ path, content })),
+      );
+      setOpen(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "加载技能详情失败");
+    }
+  }
+
+  function addFile(dir: FileDir) {
+    setFiles([...files, { path: `${dir}/`, content: "" }]);
+  }
+
+  function updateFile(idx: number, patch: Partial<SkillFile>) {
+    setFiles(files.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+  }
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const filesObj: Record<string, string> = {};
+      for (const f of files) {
+        const path = f.path.trim();
+        if (path && !path.endsWith("/")) filesObj[path] = f.content;
+      }
+      const payload = {
+        description: form.description || undefined,
+        content: form.content,
+        files: filesObj,
+      };
       if (editing) {
-        await updateSkill(editing.id, {
-          description: form.description,
-          content: form.content,
-        });
+        await updateSkill(editing.id, payload);
       } else {
-        await createSkill({
-          name: form.name.trim(),
-          description: form.description || undefined,
-          content: form.content,
-        });
+        await createSkill({ name: form.name.trim(), ...payload });
       }
       setOpen(false);
       setOk("已保存并同步到绑定的 Agent profile");
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "保存失败");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -85,15 +134,7 @@ function SkillsInner() {
         <Typography variant="h5" sx={{ flexGrow: 1 }}>
           自定义 Skill
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => {
-            setEditing(null);
-            setForm({ name: "", description: "", content: TEMPLATE });
-            setOpen(true);
-          }}
-        >
+        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           新建 Skill
         </Button>
       </Stack>
@@ -107,7 +148,7 @@ function SkillsInner() {
         <EmptyState
           icon={<AddIcon fontSize="inherit" />}
           title="还没有自定义 Skill"
-          hint="自定义 Skill 是给 Agent 的可复用操作指南（SKILL.md），绑定后写入 profile 的 skills/ 目录。"
+          hint="自定义 Skill 是给 Agent 的可复用操作指南（SKILL.md），可附带 references 文档与 scripts 脚本，绑定后写入 profile 的 skills/ 目录。"
         />
       ) : (
         <Stack spacing={1}>
@@ -122,20 +163,7 @@ function SkillsInner() {
                     variant="outlined"
                     label={`${s.bound_agents.length} 个 Agent 使用`}
                   />
-                  <Button
-                    size="small"
-                    sx={{ ml: "auto" }}
-                    onClick={() => {
-                      setEditing(s);
-                      setForm({
-                        name: s.name,
-                        description: s.description ?? "",
-                        content: "",
-                      });
-                      // 内容需按需加载：这里简化，提示重新编辑
-                      setOpen(true);
-                    }}
-                  >
+                  <Button size="small" sx={{ ml: "auto" }} onClick={() => void openEdit(s)}>
                     编辑
                   </Button>
                   <Button size="small" color="error" onClick={() => setConfirmId(s.id)}>
@@ -169,23 +197,69 @@ function SkillsInner() {
             <TextField
               label="SKILL.md 内容"
               multiline
-              minRows={12}
+              minRows={10}
               value={form.content}
               onChange={(e) => setForm({ ...form, content: e.target.value })}
               slotProps={{ input: { sx: { fontFamily: "monospace", fontSize: 13 } } }}
             />
-            {editing ? (
-              <Typography variant="caption" color="warning.main">
-                注意：编辑时内容需重新填写（列表接口不返回正文）。
-              </Typography>
-            ) : null}
+
+            {/* 附加文件：references / scripts / templates / assets */}
+            <Typography variant="subtitle2">附加文件（reference 文档与执行脚本）</Typography>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+              {FILE_DIRS.map((dir) => (
+                <Button
+                  key={dir}
+                  size="small"
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={() => addFile(dir)}
+                >
+                  {dir}/
+                </Button>
+              ))}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              scripts/ 下的脚本需要 terminal toolset 才能运行；禁用 terminal 的 Agent 会自动剥离脚本并隐藏该 Skill（SPEC 6.5）。
+            </Typography>
+
+            {files.map((f, idx) => (
+              <Card key={idx} variant="outlined">
+                <CardContent>
+                  <Stack spacing={1}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                      <TextField
+                        label="文件路径（含目录）"
+                        value={f.path}
+                        onChange={(e) => updateFile(idx, { path: e.target.value })}
+                        placeholder="references/api.md"
+                        sx={{ flexGrow: 1 }}
+                      />
+                      <IconButton
+                        color="error"
+                        onClick={() => setFiles(files.filter((_, i) => i !== idx))}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Stack>
+                    <TextField
+                      label="文件内容"
+                      multiline
+                      minRows={4}
+                      value={f.content}
+                      onChange={(e) => updateFile(idx, { content: e.target.value })}
+                      slotProps={{ input: { sx: { fontFamily: "monospace", fontSize: 12 } } }}
+                    />
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpen(false)}>取消</Button>
           <Button
             variant="contained"
-            disabled={!form.content.trim() || (!editing && !form.name.trim())}
+            disabled={busy || !form.content.trim() || (!editing && !form.name.trim())}
             onClick={() => void submit()}
           >
             保存

@@ -1,20 +1,32 @@
 """自定义 Skill 落地：写入 profile 的 skills/ 目录（直写，dashboard 无此 API）。
 
-目录约定（hermes）：<data_root>/profiles/<profile>/skills/<name>/SKILL.md
-绑定变更 / 内容变更 / 删除时全量重写该 profile 的自定义技能目录。
+目录约定（SPEC 6.2）：<data_root>/profiles/<profile>/skills/<name>/
+    ├── SKILL.md
+    ├── references/  ── 参考文档（白名单前移：写入时过滤，见 SPEC 6.3）
+    ├── templates/
+    ├── scripts/     ── 可执行脚本（需 terminal，见 SPEC 6.4/6.5）
+    └── assets/
 
-内置 Skill 走 dashboard API（GET /api/skills、PUT /api/skills/toggle），
-见 hermes/skills.py —— 两者按「有 API 用 API，没有则直写」分工。
+下发逻辑（SPEC 6.5）：
+- 技能无 scripts/ → 原样下发
+- 技能含 scripts/ 且该 Agent 禁用了 terminal → 剥离 scripts/，
+  并在 SKILL.md frontmatter 注入 requires_toolsets: [terminal]，
+  使 hermes 自动隐藏该技能（避免断链/行为不一致）
+- 技能含 scripts/ 且 terminal 可用 → 原样下发
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from .a2a import _atomic_write
 
 logger = logging.getLogger(__name__)
+
+# 允许写入的子目录（白名单前移，SPEC 6.3）
+_ALLOWED_DIRS = {"references", "templates", "scripts", "assets"}
 
 
 class SkillSyncError(Exception):
@@ -28,29 +40,98 @@ def profile_skills_dir(profile: str, data_root: str) -> Path:
     return root / "profiles" / profile / "skills"
 
 
-def _skill_md(name: str, description: str | None, content: str) -> str:
-    """生成 SKILL.md（含 frontmatter）。"""
-    desc = (description or "").replace('"', "'")
-    return f"---\nname: {name}\ndescription: \"{desc}\"\n---\n\n{content}\n"
+def _inject_requires_terminal(skill_md: str) -> str:
+    """在 SKILL.md frontmatter 注入 requires_toolsets: [terminal]。
+
+    frontmatter 形如：
+        ---
+        name: xxx
+        description: "..."
+        ---
+    注入后：
+        ---
+        name: xxx
+        description: "..."
+        metadata:
+          hermes:
+            requires_toolsets: [terminal]
+        ---
+    已有 metadata.hermes 时追加，避免重复。
+    """
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", skill_md, re.DOTALL)
+    if not m:
+        # 无 frontmatter：补一个最小的
+        head = "---\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]\n---\n\n"
+        return head + skill_md
+
+    fm = m.group(1)
+    body = skill_md[m.end():]
+    if "requires_toolsets" in fm:
+        return skill_md  # 已声明，幂等
+    # 已有 metadata: 块则在其 hermes 下追加；否则新建
+    if re.search(r"^metadata:\s*$", fm, re.MULTILINE):
+        if re.search(r"^\s+hermes:\s*$", fm, re.MULTILINE):
+            fm = re.sub(
+                r"(^\s+hermes:\s*$)",
+                r"\1\n    requires_toolsets: [terminal]",
+                fm,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            fm = re.sub(
+                r"(^metadata:\s*$)",
+                r"\1\n  hermes:\n    requires_toolsets: [terminal]",
+                fm,
+                count=1,
+                flags=re.MULTILINE,
+            )
+    else:
+        fm = fm + "\nmetadata:\n  hermes:\n    requires_toolsets: [terminal]"
+    return f"---\n{fm}\n---\n{body}"
+
+
+def _skill_md(skill, *, strip_scripts: bool) -> str:
+    desc = (skill.description or "").replace('"', "'")
+    base = f"---\nname: {skill.name}\ndescription: \"{desc}\"\n---\n\n{skill.content}\n"
+    return _inject_requires_terminal(base) if strip_scripts else base
+
+
+def _safe_rel_path(fname: str) -> Path | None:
+    """把文件清单里的相对路径限制在白名单子目录内，防路径穿越。"""
+    p = Path(fname)
+    parts = p.parts
+    if len(parts) == 1:
+        # 根级文件（非 SKILL.md，如 README）——忽略
+        return None
+    top = parts[0]
+    if top not in _ALLOWED_DIRS:
+        return None
+    if ".." in parts or any(str(x).startswith("/") for x in parts):
+        return None  # 防路径穿越
+    return Path(*parts)
 
 
 def apply_custom_skills(
     profile: str,
     data_root: str,
     skills: list,
+    *,
+    disabled_toolsets: list[str] | None = None,
 ) -> dict:
     """把自定义技能列表全量写入 profile 的 skills/ 目录。
 
-    skills: CustomSkill ORM 对象（或鸭子类型：name/description/content/files）。
-    全量语义：先清除本控制层管理的目录（_managed 标记），再写入新集合，
-    不碰非本控制层写入的目录（如内置技能）。
+    skills: CustomSkill ORM 对象（name/description/content/files）。
+    disabled_toolsets: 该 Agent 禁用的 toolset 列表；含 terminal 时剥离 scripts/。
     """
     base = profile_skills_dir(profile, data_root)
     managed = base / "_managed_by_gateway"
+    terminal_disabled = "terminal" in (disabled_toolsets or [])
     removed = 0
     written = 0
+    stripped = 0
 
-    # 清除旧托管技能：读 manifest
+    # 清除旧托管技能（读 manifest）
     old_names: set[str] = set()
     if managed.is_file():
         old_names = {
@@ -67,28 +148,49 @@ def apply_custom_skills(
     new_names: list[str] = []
     for s in skills:
         name = s.name
+        files = s.files or {}
+        has_scripts = any(
+            (f.startswith("scripts/") or "/scripts/" in f) for f in files.keys()
+        )
+        strip_scripts = has_scripts and terminal_disabled
+        if strip_scripts:
+            stripped += 1
+
         d = base / name
         d.mkdir(parents=True, exist_ok=True)
-        _atomic_write(d / "SKILL.md", _skill_md(name, s.description, s.content))
-        for fname, fcontent in (s.files or {}).items():
-            # 防路径穿越
-            safe = Path(fname).name
-            _atomic_write(d / safe, str(fcontent))
+        _atomic_write(d / "SKILL.md", _skill_md(s, strip_scripts=strip_scripts))
+
+        for fname, fcontent in files.items():
+            rel = _safe_rel_path(fname)
+            if rel is None:
+                continue
+            if strip_scripts and rel.parts[0] == "scripts":
+                continue  # SPEC 6.5：剥离脚本
+            target = d / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(target, str(fcontent))
+
         new_names.append(name)
         written += 1
 
-    # 更新 manifest（无托管技能时移除标记文件）
     if new_names:
         _atomic_write(managed, "\n".join(new_names) + "\n")
     else:
         managed.unlink(missing_ok=True)
 
-    logger.info("profile %s 自定义技能同步：写 %d 删 %d", profile, written, removed)
-    return {"written": written, "removed": removed, "dir": str(base)}
+    logger.info(
+        "profile %s 自定义技能同步：写 %d 删 %d 剥离脚本 %d (terminal_disabled=%s)",
+        profile, written, removed, stripped, terminal_disabled,
+    )
+    return {
+        "written": written,
+        "removed": removed,
+        "scripts_stripped": stripped,
+        "dir": str(base),
+    }
 
 
 def remove_skill_dir(profile: str, data_root: str, name: str) -> None:
-    """删除单个技能目录（删除自定义技能时调用）。"""
     import shutil
 
     d = profile_skills_dir(profile, data_root) / name
