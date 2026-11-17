@@ -17,6 +17,8 @@ dependencies = [
     "pydantic[email]>=2.9.0",   # EmailStr 需要 email-validator
     "pyyaml>=6.0.2",            # A2A：读写 profile 的 config.yaml
     "python-multipart>=0.0.12",
+    "lark-oapi>=1.4.0",         # 连接器：飞书（批次 3）
+    "slack-bolt>=1.21.0",       # 连接器：Slack Socket Mode（批次 3）
 ]
 
 [project.optional-dependencies]

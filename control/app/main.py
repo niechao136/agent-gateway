@@ -23,6 +23,7 @@ from .routes import (
     api_keys,
     auth,
     chat,
+    connectors as connector_routes,
     mcp as mcp_routes,
     models as model_routes,
     skills as skill_routes,
@@ -81,9 +82,16 @@ async def lifespan(app: FastAPI):
     await init_models()
     await _bootstrap_admin()
     _cleanup.start()
+    # 连接器：拉起全部 enabled（Telegram/飞书/Slack 长连接）
+    from .connectors.base import registry
+
+    started = await registry.start_all()
+    if started:
+        logger.info("已启动 %d 个连接器", started)
     try:
         yield
     finally:
+        await registry.stop_all()
         await _cleanup.stop()
 
 
@@ -109,6 +117,7 @@ app.include_router(skill_routes.agent_router)  # /api/agents/{id}/skills
 app.include_router(toolset_routes.router)  # /api/toolsets
 app.include_router(api_keys.router)        # /api/agents/{id}/api-keys
 app.include_router(v1_routes.router)       # /api/v1（对外，agk 鉴权）
+app.include_router(connector_routes.router)  # /api/connectors
 app.include_router(model_routes.router)    # /api/models
 app.include_router(a2a_inbound.router)     # /api/a2a/inbound
 app.include_router(users.router)           # /api/admin/users
