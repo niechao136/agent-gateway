@@ -91,6 +91,38 @@ class FakeDashboard:
     async def auth_providers(self):
         return [{"name": "basic"}]
 
+    # ── 通用请求（skill 内置路由走 _request / try_endpoint）──
+    skills_state: dict[str, bool] = {}
+
+    async def _request(self, method: str, path: str, **kw):
+        FakeDashboard.calls.append((method, path))
+        if path.startswith("/api/skills?profile=") or path == "/api/skills":
+            # 返回一个稳定的内置技能清单
+            names = ["greeter", "memory-helper", "echo"]
+            return [
+                {
+                    "name": n,
+                    "description": f"built-in {n}",
+                    "enabled": FakeDashboard.skills_state.get(n, True),
+                }
+                for n in names
+            ]
+        if path == "/api/skills/toggle":
+            body = kw.get("json") or {}
+            FakeDashboard.skills_state[body.get("name", "")] = bool(body.get("enabled"))
+            return {"ok": True, **body}
+        if path == "/api/toolsets/catalog":
+            return None  # 模拟无此端点 → 走静态降级
+        raise RuntimeError(f"FakeDashboard 未实现 {method} {path}")
+
+    async def try_endpoint(self, method: str, path: str, **kw):
+        try:
+            return await self._request(method, path, **kw)
+        except RuntimeError as exc:
+            if "404" in str(exc) or "未实现" in str(exc):
+                return None
+            raise
+
 
 class FakeGateway:
     """内存版 GatewayClient。"""
@@ -152,10 +184,15 @@ def _patch_hermes(monkeypatch):
     import app.hermes.conversations as conv_mod
     import app.hermes.gateway as gw_mod
     import app.hermes.provisioner as prov_mod
+    import app.hermes.skills as skills_mod
     import app.routes.chat as chat_route
+    import app.routes.toolsets as toolsets_route
 
     monkeypatch.setattr(client_mod, "DashboardClient", FakeDashboard)
     monkeypatch.setattr(prov_mod, "DashboardClient", FakeDashboard)
+    monkeypatch.setattr(skills_mod, "DashboardClient", FakeDashboard)
+    monkeypatch.setattr(toolsets_route.DashboardClient, "__call__", FakeDashboard, raising=False)
+    monkeypatch.setattr(toolsets_route, "DashboardClient", FakeDashboard)
     monkeypatch.setattr(gw_mod, "GatewayClient", FakeGateway)
     monkeypatch.setattr(conv_mod, "GatewayClient", FakeGateway)
     monkeypatch.setattr(chat_route.gw_mod, "GatewayClient", FakeGateway)

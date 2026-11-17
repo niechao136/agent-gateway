@@ -156,7 +156,7 @@ async def create_endpoint(
 ) -> EndpointOut:
     _validate_auth(body)
     try:
-        validate_endpoint(body.url)
+        validate_endpoint(body.name, body.url)
     except A2AError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
@@ -225,7 +225,7 @@ async def update_endpoint(
 
     if body.url is not None:
         try:
-            validate_endpoint(e.url)
+            validate_endpoint(e.name, e.url)
         except A2AError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     _validate_auth(e)  # 组合校验（e 有 token/auth_name/auth_type 属性）
