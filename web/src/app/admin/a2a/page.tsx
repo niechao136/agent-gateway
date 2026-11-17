@@ -1,78 +1,81 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import AppBar from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import Typography from "@mui/material/Typography";
-import Container from "@mui/material/Container";
-import Paper from "@mui/material/Paper";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
 import Alert from "@mui/material/Alert";
-import CircularProgress from "@mui/material/CircularProgress";
-import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import RefreshIcon from "@mui/icons-material/Refresh";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CancelIcon from "@mui/icons-material/Cancel";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import AddIcon from "@mui/icons-material/Add";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import {
+  ApiError,
+  createA2AEndpoint,
+  deleteA2AEndpoint,
+  getA2AInbound,
+  listA2AEndpoints,
+  pingA2AInbound,
+  updateA2AEndpoint,
+  type A2AEndpoint,
+} from "@/lib/api";
+import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
-import { AdminNav } from "@/components/AdminNav";
+import { AuthFields } from "@/components/AuthFields";
+import { ConfirmDialog, EmptyState, SkeletonList } from "@/components/Common";
 
-interface InboundStatus {
-  host: string;
-  port: number;
-  probe_base: string;
-  bearer_token_masked: string | null;
-  peer_tokens_count: number;
-  trusted_peers: string | null;
-  allow_all_users: boolean;
-  checks: Record<string, boolean>;
-  ready: boolean;
-  reachable: boolean;
-  agent_card: {
-    name?: string;
-    description?: string;
-    url?: string;
-    version?: string;
-    skills?: { id?: string; name?: string; description?: string }[];
-    capabilities?: Record<string, unknown>;
-  } | null;
-  error: string | null;
+const AUTH_TYPES = ["none", "bearer", "header", "query", "basic"] as const;
+
+interface Form {
+  name: string;
+  description: string;
+  url: string;
+  timeout: string;
+  auth_type: (typeof AUTH_TYPES)[number];
+  token: string;
+  auth_name: string;
 }
 
-export default function A2AInboundPage() {
-  return (
-    <GuardedShell require="admin">
-      <InboundView />
-    </GuardedShell>
-  );
-}
+const EMPTY: Form = {
+  name: "",
+  description: "",
+  url: "",
+  timeout: "120",
+  auth_type: "none",
+  token: "",
+  auth_name: "",
+};
 
-function InboundView() {
-  const [data, setData] = useState<InboundStatus | null>(null);
+function A2aInner() {
+  const [endpoints, setEndpoints] = useState<A2AEndpoint[] | null>(null);
+  const [inbound, setInbound] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [ok, setOk] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<A2AEndpoint | null>(null);
+  const [form, setForm] = useState<Form>(EMPTY);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    setBusy(true);
     try {
-      const token = localStorage.getItem("ag_token");
-      const r = await fetch("/api/admin/a2a-inbound", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setData(await r.json());
-      setError(null);
+      const [eps, ib] = await Promise.all([
+        listA2AEndpoints(),
+        getA2AInbound().catch(() => null),
+      ]);
+      setEndpoints(eps);
+      setInbound(ib as Record<string, unknown> | null);
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
+      setError(e instanceof ApiError ? e.message : "加载失败");
     }
   }, []);
 
@@ -80,177 +83,228 @@ function InboundView() {
     void load();
   }, [load]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY);
+    setDialogOpen(true);
+  }
+
+  function openEdit(e: A2AEndpoint) {
+    setEditing(e);
+    setForm({
+      name: e.name,
+      description: e.description ?? "",
+      url: e.url,
+      timeout: String(e.timeout),
+      auth_type: e.auth_type,
+      token: "",
+      auth_name: e.auth_name ?? "",
+    });
+    setDialogOpen(true);
+  }
+
+  async function submit() {
+    try {
+      const body = {
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        url: form.url.trim(),
+        timeout: Number(form.timeout) || 120,
+        auth_type: form.auth_type,
+        token: form.token || undefined,
+        auth_name: ["header", "query"].includes(form.auth_type) ? form.auth_name.trim() : undefined,
+      };
+      if (editing) await updateA2AEndpoint(editing.id, body);
+      else await createA2AEndpoint(body);
+      setDialogOpen(false);
+      setOk("已保存并同步到绑定的 Agent");
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "保存失败");
+    }
+  }
+
   return (
-    <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-      <AppBar
-        position="sticky"
-        color="inherit"
-        elevation={0}
-        sx={{ borderBottom: 1, borderColor: "divider" }}
-      >
-        <Toolbar>
-          <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
-            管理中心
-          </Typography>
-          <AdminNav current="a2a" />
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 700, flexGrow: 1 }}>
-            A2A 入站
-          </Typography>
-          <Button startIcon={<RefreshIcon />} onClick={() => void load()} disabled={busy}>
-            刷新
-          </Button>
-        </Box>
-
-        <Alert severity="info" sx={{ mb: 2 }}>
-          入站表示「外部 Agent 可以调用本平台」。配置来自 hermes 的 .env，
-          需重启 hermes 生效。三项缺一不可：token、host 放开、trusted peers。
-        </Alert>
-
-        {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
-
-        {data === null ? (
-          <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <Stack spacing={2}>
-            <Paper sx={{ p: 2.5 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5 }}>
-                状态
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap" }}>
-                <Chip
-                  icon={data.ready ? <CheckCircleIcon /> : <CancelIcon />}
-                  label={data.ready ? "配置完整" : "配置不完整"}
-                  color={data.ready ? "success" : "error"}
-                />
-                <Chip
-                  icon={data.reachable ? <CheckCircleIcon /> : <CancelIcon />}
-                  label={data.reachable ? "服务可达" : "服务不可达"}
-                  color={data.reachable ? "success" : "warning"}
-                  variant="outlined"
-                />
-              </Stack>
-
-              <Divider sx={{ my: 1.5 }} />
-
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                配置检查
-              </Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>检查项</TableCell>
-                    <TableCell>结果</TableCell>
-                    <TableCell>说明</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  <CheckRow
-                    name="token_configured"
-                    ok={data.checks.token_configured}
-                    desc="A2A_BEARER_TOKEN 或 A2A_PEER_TOKENS（缺失则只绑 127.0.0.1）"
-                  />
-                  <CheckRow
-                    name="host_widened"
-                    ok={data.checks.host_widened}
-                    desc="A2A_HOST=0.0.0.0（缺失则出不了容器）"
-                  />
-                  <CheckRow
-                    name="trusted_peers_configured"
-                    ok={data.checks.trusted_peers_configured}
-                    desc="A2A_TRUSTED_PEERS（缺失则 dispatch 被拒：peer not trusted）"
-                  />
-                </TableBody>
-              </Table>
-
-              <Divider sx={{ my: 1.5 }} />
-
-              <Stack spacing={0.5}>
-                <Row k="监听地址" v={`${data.host}:${data.port}`} />
-                <Row k="探测地址" v={data.probe_base} />
-                <Row k="Bearer Token" v={data.bearer_token_masked ?? "未配置"} />
-                <Row k="Peer Tokens" v={`${data.peer_tokens_count} 个`} />
-                <Row k="Trusted Peers" v={data.trusted_peers ?? "未配置"} />
-                <Row k="Allow All Users" v={data.allow_all_users ? "是（仅开发）" : "否"} />
-              </Stack>
-
-              {data.error ? (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  {data.error}
-                </Alert>
-              ) : null}
-            </Paper>
-
-            {data.agent_card ? (
-              <Paper sx={{ p: 2.5 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5 }}>
-                  Agent Card
-                </Typography>
-                <Stack spacing={0.5} sx={{ mb: 2 }}>
-                  <Row k="名称" v={data.agent_card.name ?? "—"} />
-                  <Row k="版本" v={data.agent_card.version ?? "—"} />
-                  <Row k="URL" v={data.agent_card.url ?? "—"} />
-                  <Row k="技能数" v={String(data.agent_card.skills?.length ?? 0)} />
-                </Stack>
-                {data.agent_card.skills?.length ? (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {data.agent_card.skills.slice(0, 40).map((s, i) => (
-                      <Chip
-                        key={s.id ?? i}
-                        size="small"
-                        variant="outlined"
-                        label={s.name ?? s.id ?? `skill-${i}`}
-                      />
-                    ))}
-                  </Box>
-                ) : null}
-              </Paper>
-            ) : null}
-          </Stack>
-        )}
-      </Container>
-    </Box>
-  );
-}
-
-function CheckRow({ name, ok, desc }: { name: string; ok: boolean; desc: string }) {
-  return (
-    <TableRow>
-      <TableCell>
-        <code style={{ fontSize: 12 }}>{name}</code>
-      </TableCell>
-      <TableCell>
-        <Chip
-          size="small"
-          label={ok ? "通过" : "缺失"}
-          color={ok ? "success" : "error"}
-          variant="outlined"
-        />
-      </TableCell>
-      <TableCell>
-        <Typography variant="caption" color="text.secondary">
-          {desc}
+    <Stack spacing={2}>
+      <Stack direction="row" alignItems="center">
+        <Typography variant="h5" sx={{ flexGrow: 1 }}>
+          A2A
         </Typography>
-      </TableCell>
-    </TableRow>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+          新建出站端点
+        </Button>
+      </Stack>
+
+      {error ? <Alert severity="error" onClose={() => setError(null)}>{error}</Alert> : null}
+      {ok ? <Alert severity="success" onClose={() => setOk(null)}>{ok}</Alert> : null}
+
+      {/* 1. 入站状态 */}
+      <Card>
+        <CardContent>
+          <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+            <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+              入站状态
+            </Typography>
+            <Button
+              size="small"
+              onClick={async () => {
+                try {
+                  await pingA2AInbound();
+                  await load();
+                  setOk("入站探测已执行");
+                } catch (e) {
+                  setError(e instanceof ApiError ? e.message : "探测失败");
+                }
+              }}
+            >
+              探测
+            </Button>
+          </Stack>
+          {inbound === null ? (
+            <Typography variant="body2" color="text.secondary">
+              入站状态不可用（hermes 未运行或 A2A 未启用）。
+            </Typography>
+          ) : (
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              {Object.entries(inbound)
+                .filter(([k]) => !k.startsWith("_"))
+                .slice(0, 8)
+                .map(([k, v]) => (
+                  <Chip
+                    key={k}
+                    size="small"
+                    label={`${k}: ${typeof v === "boolean" ? (v ? "✓" : "✗") : String(v).slice(0, 30)}`}
+                    variant="outlined"
+                  />
+                ))}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 2. 出站端点 */}
+      <Typography variant="h6">出站端点</Typography>
+      {endpoints === null ? (
+        <SkeletonList />
+      ) : endpoints.length === 0 ? (
+        <EmptyState
+          icon={<AddIcon fontSize="inherit" />}
+          title="还没有出站端点"
+          hint="出站端点是本平台 Agent 调用其他 Agent 的目标地址；在 Agent 编辑页绑定到具体 Agent。"
+        />
+      ) : (
+        <Stack spacing={1}>
+          {endpoints.map((e) => (
+            <Card key={e.id}>
+              <CardContent>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography fontWeight={700}>{e.name}</Typography>
+                  {e.is_shared ? <Chip size="small" label="共享" /> : null}
+                  <Chip
+                    size="small"
+                    label={e.enabled ? "启用" : "停用"}
+                    color={e.enabled ? "success" : "default"}
+                    variant="outlined"
+                  />
+                  <Chip size="small" label={`鉴权: ${e.auth_type}`} variant="outlined" />
+                  <Button size="small" onClick={() => openEdit(e)} sx={{ ml: "auto" }}>
+                    编辑
+                  </Button>
+                  <Button size="small" color="error" onClick={() => setConfirmId(e.id)}>
+                    删除
+                  </Button>
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  {e.url} · timeout {e.timeout}s
+                </Typography>
+              </CardContent>
+            </Card>
+          ))}
+        </Stack>
+      )}
+
+      {/* 3. 使用说明 */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography>使用说明</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" component="div">
+            <div>· 入站：其他平台的 Agent 通过 A2A 协议调用本平台的 Agent（hermes 负责协议端点）。</div>
+            <div>· 出站：在 Agent 编辑页把端点绑定到 Agent，配置会写入该 profile 的 config.yaml: a2a_agents 段。</div>
+            <div>· 鉴权支持 none / bearer / header / query / basic 五种方式。</div>
+            <div>· 端点修改后自动同步到所有绑定的 Agent。</div>
+          </Typography>
+        </AccordionDetails>
+      </Accordion>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{editing ? "编辑出站端点" : "新建出站端点"}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="名称"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+            <TextField
+              label="URL"
+              value={form.url}
+              onChange={(e) => setForm({ ...form, url: e.target.value })}
+              placeholder="http://host:port"
+            />
+            <TextField
+              label="超时（秒）"
+              type="number"
+              value={form.timeout}
+              onChange={(e) => setForm({ ...form, timeout: e.target.value })}
+            />
+            <Divider />
+            <AuthFields
+              authType={form.auth_type}
+              token={form.token}
+              authName={form.auth_name}
+              hasExistingToken={editing?.has_token ?? false}
+              authTypes={AUTH_TYPES}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>取消</Button>
+          <Button variant="contained" disabled={!form.name.trim() || !form.url.trim()} onClick={() => void submit()}>
+            保存
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirmId !== null}
+        danger
+        title="删除出站端点"
+        message="若仍被 Agent 绑定，将确认后强制删除并解绑。"
+        confirmText="删除"
+        onConfirm={async () => {
+          if (confirmId === null) return;
+          try {
+            await deleteA2AEndpoint(confirmId, true);
+            await load();
+          } catch (e) {
+            setError(e instanceof ApiError ? e.message : "删除失败");
+          }
+        }}
+        onClose={() => setConfirmId(null)}
+      />
+    </Stack>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+export default function A2APage() {
   return (
-    <Box sx={{ display: "flex", gap: 1 }}>
-      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 110 }}>
-        {k}
-      </Typography>
-      <Typography variant="body2" sx={{ wordBreak: "break-all" }}>
-        {v}
-      </Typography>
-    </Box>
+    <GuardedShell>
+      <AdminShell>
+        <A2aInner />
+      </AdminShell>
+    </GuardedShell>
   );
 }
