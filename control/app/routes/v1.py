@@ -64,10 +64,10 @@ def _reset_rate_limit() -> None:
 
 
 # ── 鉴权 ──────────────────────────────────────────────────
-async def api_key_agent(
+async def api_key_agent_impl(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> tuple[AgentAPIKey, Agent]:
+    session: AsyncSession,
+):
     """校验 agk_ Bearer → 返回 (key, agent)。"""
     auth = request.headers.get("authorization") or ""
     if not auth.lower().startswith("bearer "):
@@ -107,9 +107,6 @@ async def api_key_agent(
         await session.rollback()
 
     return key, agent
-
-
-KeyAgent = Annotated[tuple[AgentAPIKey, Agent], Depends(api_key_agent)]
 
 
 # ── Schemas（Messages 语义，非 OpenAI）────────────────────
@@ -192,19 +189,23 @@ async def _get_or_create_session(
 
 # ── 端点 ──────────────────────────────────────────────────
 @router.get("/agents", response_model=list[AgentBrief])
-async def list_my_agents(ka: KeyAgent) -> list[AgentBrief]:
-    """该 Key 可用的 Agent（按设计只有一个）。"""
-    return [_brief(ka[1])]
+async def list_my_agents(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> list[AgentBrief]:
+    key, agent = await api_key_agent_impl(request, session)
+    return [_brief(agent)]
 
 
 @router.post("/agents/{slug}/messages")
 async def post_message(
     slug: str,
     body: MessageIn,
-    ka: KeyAgent,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
     """发消息。stream=false 返回完整回复；stream=true 返回 SSE（与前端同一翻译管道）。"""
+    ka = await api_key_agent_impl(request, session)
     agent = await _resolve_agent_for_key(session, ka, slug)
     conv = await _get_or_create_session(session, agent, body.session_id)
     sid = conv.hermes_session_id
@@ -268,10 +269,10 @@ async def post_message(
 @router.get("/sessions/{session_id}", response_model=SessionOut)
 async def get_session(
     session_id: str,
-    ka: KeyAgent,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> SessionOut:
-    key, agent = ka
+    key, agent = await api_key_agent_impl(request, session)
     conv = (
         await session.execute(
             select(Conversation).where(
@@ -294,11 +295,11 @@ async def get_session(
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(
     session_id: str,
-    ka: KeyAgent,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+    session: AsyncSession = Depends(get_session),
     limit: int = 200,
-) -> dict:
-    key, agent = ka
+):
+    key, agent = await api_key_agent_impl(request, session)
     conv = (
         await session.execute(
             select(Conversation).where(

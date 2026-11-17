@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..connectors.registry import registry
+from ..connectors.base import registry
 from ..database import get_session
 from ..models import Agent, Connector, UserRole
 from ..security import CurrentUser, can_modify
