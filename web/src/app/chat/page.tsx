@@ -16,7 +16,19 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import ChatIcon from "@mui/icons-material/Chat";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { ApiError, listVisibleAgents, logout, type Agent } from "@/lib/api";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import {
+  ApiError,
+  getRole,
+  listVisibleAgents,
+  logout,
+  type Agent,
+} from "@/lib/api";
+import { useColorMode } from "@/lib/theme";
 import { GuardedShell } from "@/lib/authGuard";
 
 export default function ChatIndexPage() {
@@ -29,6 +41,8 @@ export default function ChatIndexPage() {
 
 function AgentPicker() {
   const router = useRouter();
+  const { mode, toggle } = useColorMode();
+  const isAdmin = getRole() === "admin";
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +59,20 @@ function AgentPicker() {
           <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
             Agent Gateway
           </Typography>
+          <Tooltip title={mode === "dark" ? "切换亮色" : "切换暗色"}>
+            <IconButton onClick={toggle} size="small">
+              {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
+          </Tooltip>
+          {isAdmin ? (
+            <Button
+              startIcon={<AdminPanelSettingsIcon />}
+              onClick={() => router.push("/admin")}
+              sx={{ ml: 1 }}
+            >
+              管理中心
+            </Button>
+          ) : null}
           <Button
             startIcon={<LogoutIcon />}
             onClick={() => {

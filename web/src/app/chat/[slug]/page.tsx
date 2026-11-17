@@ -17,6 +17,10 @@ import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
 import Divider from "@mui/material/Divider";
+import Tooltip from "@mui/material/Tooltip";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import MenuIcon from "@mui/icons-material/Menu";
 import SendIcon from "@mui/icons-material/Send";
@@ -27,10 +31,12 @@ import {
   createConversation,
   deleteConversation,
   getMessages,
+  getRole,
   listConversations,
   type Conversation,
 } from "@/lib/api";
 import { GuardedShell } from "@/lib/authGuard";
+import { useColorMode } from "@/lib/theme";
 import { streamChat } from "@/lib/sse";
 import type { ChatMessage } from "@/lib/chatTypes";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -45,6 +51,8 @@ export default function ChatPage() {
 
 function ChatView() {
   const router = useRouter();
+  const { mode, toggle } = useColorMode();
+  const isAdmin = getRole() === "admin";
   const params = useParams<{ slug: string; threadId?: string }>();
   const slug = params.slug;
   const urlThreadId = params.threadId ? Number(params.threadId) : null;
@@ -219,6 +227,18 @@ function ChatView() {
           <Typography variant="subtitle1" sx={{ fontWeight: 600, flexGrow: 1, ml: 0.5 }}>
             {slug}
           </Typography>
+          <Tooltip title={mode === "dark" ? "切换亮色" : "切换暗色"}>
+            <IconButton onClick={toggle} size="small">
+              {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
+          </Tooltip>
+          {isAdmin ? (
+            <Tooltip title="管理中心">
+              <IconButton onClick={() => router.push("/admin")} size="small">
+                <AdminPanelSettingsIcon />
+              </IconButton>
+            </Tooltip>
+          ) : null}
           <IconButton onClick={() => setDrawer(true)} aria-label="会话列表">
             <MenuIcon />
           </IconButton>

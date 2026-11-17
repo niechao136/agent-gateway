@@ -53,8 +53,6 @@ function systemScheme(): Exclude<Mode, "system"> {
 function buildTheme(scheme: Scheme) {
   const dark = scheme === "dark";
   return createTheme({
-    cssVariables: true,
-    colorSchemes: { light: true, dark: true },
     palette: {
       mode: scheme,
       primary: { main: dark ? "#60a5fa" : "#2563eb" },
@@ -62,11 +60,16 @@ function buildTheme(scheme: Scheme) {
       success: { main: "#16a34a" },
       warning: { main: "#d97706" },
       error: { main: dark ? "#f87171" : "#dc2626" },
+      // 亮色：纯白背景；暗色：深灰（非 MUI 默认蓝黑）
       background: {
-        default: dark ? "#0b1020" : "#f6f7fb",
-        paper: dark ? "#111827" : "#ffffff",
+        default: dark ? "#0f1115" : "#ffffff",
+        paper: dark ? "#1a1d24" : "#ffffff",
       },
-      divider: dark ? "rgba(148,163,184,0.2)" : "rgba(15,23,42,0.08)",
+      text: {
+        primary: dark ? "#e8eaed" : "#111827",
+        secondary: dark ? "#9aa0aa" : "#5f6570",
+      },
+      divider: dark ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.12)",
     },
     shape: { borderRadius: 12 },
     typography: {
@@ -142,8 +145,8 @@ export function ThemeRegistry({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider value={value}>
-      <MuiThemeProvider theme={theme} defaultMode={resolved}>
-        <CssBaseline enableColorScheme />
+      <MuiThemeProvider theme={theme}>
+        <CssBaseline />
         {children}
       </MuiThemeProvider>
     </ThemeContext.Provider>
