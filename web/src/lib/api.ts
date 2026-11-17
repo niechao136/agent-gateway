@@ -84,6 +84,8 @@ export function clearSession(): void {
 }
 
 // ── 基础请求 ──────────────────────────────────────────────
+export const API_BASE = "/api";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -102,7 +104,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`/api${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
 
   if (res.status === 401) {
     clearSession();
@@ -231,126 +233,410 @@ export async function updateUser(
   });
 }
 
-// ── Agent Skills ──────────────────────────────────────────
-export interface AgentSkill {
-  name: string;
-  description: string | null;
-  category: string | null;
-  enabled: boolean;
-  locked: boolean;
-  provenance: string | null;
-}
-
-export async function listAgentSkills(agentId: number): Promise<AgentSkill[]> {
-  return request<AgentSkill[]>(`/agents/${agentId}/skills`);
-}
-
-export async function toggleAgentSkill(
-  agentId: number,
-  name: string,
-  enabled: boolean,
-): Promise<AgentSkill> {
-  return request<AgentSkill>(`/agents/${agentId}/skills/toggle`, {
-    method: "POST",
-    body: JSON.stringify({ name, enabled }),
-  });
-}
-
-// ── A2A 端点 ──────────────────────────────────────────────
-export interface A2AEndpoint {
+// ── 自定义 Skill（批次 2）────────────────────────────────
+export interface CustomSkill {
   id: number;
   name: string;
-  url: string;
-  capabilities: string[];
-  timeout: number;
+  owner_id: number;
+  description: string | null;
+  is_shared: boolean;
+  bound_agents: number[];
+}
+
+export async function listSkills(): Promise<CustomSkill[]> {
+  return request<CustomSkill[]>("/skills");
+}
+
+export async function createSkill(body: {
+  name: string;
+  description?: string;
+  content: string;
+  files?: Record<string, string>;
+  is_shared?: boolean;
+}): Promise<CustomSkill> {
+  return request<CustomSkill>("/skills", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateSkill(
+  id: number,
+  body: { description?: string; content?: string; files?: Record<string, string>; is_shared?: boolean },
+): Promise<CustomSkill> {
+  return request<CustomSkill>(`/skills/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteSkill(id: number, force = false): Promise<void> {
+  return request<void>(`/skills/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+
+// ── 内置 Skill（批次 2）──────────────────────────────────
+export interface BuiltinSkill {
+  name: string;
+  description: string | null;
   enabled: boolean;
 }
 
-export async function listA2AEndpoints(agentId: number): Promise<A2AEndpoint[]> {
-  return request<A2AEndpoint[]>(`/agents/${agentId}/a2a`);
+export async function listBuiltinSkills(): Promise<BuiltinSkill[]> {
+  return request<BuiltinSkill[]>("/skills/builtin");
 }
 
-export async function createA2AEndpoint(
-  agentId: number,
-  body: { name: string; url: string; capabilities: string[]; timeout: number },
-): Promise<{ endpoint: A2AEndpoint; apply_error: string | null }> {
-  return request(`/agents/${agentId}/a2a`, {
-    method: "POST",
-    body: JSON.stringify(body),
+export async function toggleBuiltinSkill(
+  name: string,
+  enabled: boolean,
+  affectedAgentIds: number[],
+): Promise<{ name: string; enabled: boolean; agents: { agent_id: number; ok: boolean; error?: string }[]; errors: string[] }> {
+  return request(`/skills/builtin/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled, affected_agent_ids: affectedAgentIds }),
   });
 }
 
-export async function deleteA2AEndpoint(agentId: number, endpointId: number): Promise<void> {
-  return request<void>(`/agents/${agentId}/a2a/${endpointId}`, { method: "DELETE" });
+export async function bindAgentSkills(
+  agentId: number,
+  skillIds: number[],
+): Promise<{ bound: number; sync: Record<string, unknown> }> {
+  return request(`/agents/${agentId}/skills`, {
+    method: "PUT",
+    body: JSON.stringify({ skill_ids: skillIds }),
+  });
 }
 
-// ── MCP 服务器 ────────────────────────────────────────────
-export interface MCPServer {
+export async function listAgentSkillBindings(
+  agentId: number,
+): Promise<{ agent_id: number; profile: string; bound: CustomSkill[] }> {
+  return request(`/agents/${agentId}/skills`);
+}
+
+// ── toolset catalog（批次 2）─────────────────────────────
+export interface ToolsetCatalogItem {
   name: string;
-  transport: string;
-  url: string | null;
+  risk?: string;
+  tools: string[];
+}
+
+export async function getToolsetCatalog(): Promise<{
+  source: "dashboard" | "static";
+  toolsets: ToolsetCatalogItem[];
+}> {
+  return request("/toolsets");
+}
+
+// ── MCP 服务器（批次 2 独立表）───────────────────────────
+export type AuthType = "none" | "bearer" | "header" | "query" | "basic";
+
+export interface MCPServer {
+  id: number;
+  name: string;
+  owner_id: number;
+  description: string | null;
+  transport: "stdio" | "sse" | "http" | "streamable_http";
   command: string | null;
   args: string[] | null;
   env: Record<string, string> | null;
+  url: string | null;
+  auth_type: AuthType;
+  has_token: boolean;
+  auth_name: string | null;
+  is_shared: boolean;
   enabled: boolean;
-  tools?: unknown;
-  source?: string | null;
-  plugin?: string | null;
 }
 
-export async function listMCP(agentId: number): Promise<{ profile: string; servers: MCPServer[] }> {
+export interface MCPBody {
+  name: string;
+  description?: string;
+  transport?: MCPServer["transport"];
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  auth_type?: AuthType;
+  token?: string;
+  auth_name?: string;
+  is_shared?: boolean;
+  enabled?: boolean;
+}
+
+export async function listMCPServers(): Promise<MCPServer[]> {
+  return request<MCPServer[]>("/mcp");
+}
+
+export async function createMCPServer(body: MCPBody): Promise<MCPServer> {
+  return request<MCPServer>("/mcp", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateMCPServer(
+  id: number,
+  body: Partial<MCPBody> & { token?: string },
+): Promise<MCPServer> {
+  return request<MCPServer>(`/mcp/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteMCPServer(id: number, force = false): Promise<void> {
+  return request<void>(`/mcp/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+
+export async function testMCPServer(id: number): Promise<Record<string, unknown>> {
+  return request(`/mcp/${id}/test`, { method: "POST" });
+}
+
+export interface AgentMCPBindings {
+  agent_id: number;
+  profile: string;
+  bound: MCPServer[];
+  effective_in_profile: unknown;
+}
+
+export async function getAgentMCP(agentId: number): Promise<AgentMCPBindings> {
   return request(`/agents/${agentId}/mcp`);
 }
 
-export async function addMCP(
+export async function setAgentMCP(
   agentId: number,
-  body: {
-    name: string;
-    transport: string;
-    command?: string;
-    args?: string[];
-    url?: string;
-    enabled?: boolean;
-  },
-): Promise<MCPServer> {
+  mcpServerIds: number[],
+): Promise<{ bound: number; sync: Record<string, unknown> }> {
   return request(`/agents/${agentId}/mcp`, {
+    method: "PUT",
+    body: JSON.stringify({ mcp_server_ids: mcpServerIds }),
+  });
+}
+
+export async function createAndBindMCP(
+  agentId: number,
+  body: MCPBody,
+): Promise<{ created: boolean; server: MCPServer; sync: Record<string, unknown> }> {
+  return request(`/agents/${agentId}/mcp/create-and-bind`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export async function deleteMCP(agentId: number, name: string): Promise<void> {
-  return request<void>(`/agents/${agentId}/mcp/${encodeURIComponent(name)}`, {
-    method: "DELETE",
+// ── A2A 出站端点（批次 2 独立表）─────────────────────────
+export interface A2AEndpoint {
+  id: number;
+  name: string;
+  owner_id: number;
+  description: string | null;
+  url: string;
+  capabilities: string[] | null;
+  timeout: number;
+  auth_type: AuthType;
+  has_token: boolean;
+  auth_name: string | null;
+  is_shared: boolean;
+  enabled: boolean;
+}
+
+export interface A2AEndpointBody {
+  name: string;
+  description?: string;
+  url: string;
+  capabilities?: string[];
+  timeout?: number;
+  auth_type?: AuthType;
+  token?: string;
+  auth_name?: string;
+  is_shared?: boolean;
+  enabled?: boolean;
+}
+
+export async function listA2AEndpoints(): Promise<A2AEndpoint[]> {
+  return request<A2AEndpoint[]>("/a2a/endpoints");
+}
+
+export async function createA2AEndpoint(body: A2AEndpointBody): Promise<A2AEndpoint> {
+  return request<A2AEndpoint>("/a2a/endpoints", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateA2AEndpoint(
+  id: number,
+  body: Partial<A2AEndpointBody>,
+): Promise<A2AEndpoint> {
+  return request<A2AEndpoint>(`/a2a/endpoints/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteA2AEndpoint(id: number, force = false): Promise<void> {
+  return request<void>(`/a2a/endpoints/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+
+export interface AgentA2ABindings {
+  agent_id: number;
+  profile: string;
+  bound: A2AEndpoint[];
+  effective_in_profile: unknown;
+}
+
+export async function getAgentA2A(agentId: number): Promise<AgentA2ABindings> {
+  return request(`/agents/${agentId}/a2a`);
+}
+
+export async function setAgentA2A(
+  agentId: number,
+  endpointIds: number[],
+): Promise<{ bound: number; sync: Record<string, unknown> }> {
+  return request(`/agents/${agentId}/a2a`, {
+    method: "PUT",
+    body: JSON.stringify({ endpoint_ids: endpointIds }),
   });
 }
 
-export async function testMCP(agentId: number, name: string): Promise<Record<string, unknown>> {
-  return request(`/agents/${agentId}/mcp/${encodeURIComponent(name)}/test`, {
+export async function createAndBindA2A(
+  agentId: number,
+  body: A2AEndpointBody,
+): Promise<{ created: boolean; endpoint: A2AEndpoint; sync: Record<string, unknown> }> {
+  return request(`/agents/${agentId}/a2a/create-and-bind`, {
     method: "POST",
+    body: JSON.stringify(body),
   });
 }
 
-export async function toggleMCP(
+export interface A2AInboundStatus {
+  ok?: boolean;
+  [k: string]: unknown;
+}
+
+export async function getA2AInbound(): Promise<A2AInboundStatus> {
+  return request("/a2a/inbound");
+}
+
+export async function pingA2AInbound(): Promise<A2AInboundStatus> {
+  return request("/a2a/inbound/ping", { method: "POST" });
+}
+
+// ── 连接器（批次 3）──────────────────────────────────────
+export type ConnectorPlatform = "telegram" | "feishu" | "slack";
+
+export interface ConnectorRuntime {
+  state: "idle" | "connecting" | "connected" | "error" | "stopped";
+  last_error: string | null;
+  last_connected_at: number | null;
+  messages_in: number;
+  messages_out: number;
+}
+
+export interface Connector {
+  id: number;
+  name: string;
+  owner_id: number;
+  platform: ConnectorPlatform;
+  agent_id: number;
+  agent_slug?: string | null;
+  credentials: Record<string, string>;
+  enabled: boolean;
+  runtime?: ConnectorRuntime | null;
+}
+
+const PLATFORM_CREDENTIALS: Record<ConnectorPlatform, string[]> = {
+  telegram: ["bot_token"],
+  feishu: ["app_id", "app_secret"],
+  slack: ["app_token", "bot_token"],
+};
+
+export function platformCredentialFields(p: ConnectorPlatform): string[] {
+  return PLATFORM_CREDENTIALS[p];
+}
+
+export async function listConnectors(): Promise<Connector[]> {
+  return request<Connector[]>("/connectors");
+}
+
+export async function createConnector(body: {
+  name: string;
+  platform: ConnectorPlatform;
+  agent_id: number;
+  credentials: Record<string, string>;
+  enabled?: boolean;
+}): Promise<Connector> {
+  return request<Connector>("/connectors", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateConnector(
+  id: number,
+  body: { name?: string; agent_id?: number; credentials?: Record<string, string>; enabled?: boolean },
+): Promise<Connector> {
+  return request<Connector>(`/connectors/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteConnector(id: number): Promise<void> {
+  return request<void>(`/connectors/${id}`, { method: "DELETE" });
+}
+
+export async function restartConnector(id: number): Promise<unknown> {
+  return request(`/connectors/${id}/restart`, { method: "POST" });
+}
+
+export async function testConnector(id: number): Promise<Record<string, unknown>> {
+  return request(`/connectors/${id}/test`, { method: "POST" });
+}
+
+/** SSE 订阅连接器状态变更（批次 4 决策：SSE 推送）。 */
+export function subscribeConnectorStatus(
+  onMessage: (connectors: Connector[]) => void,
+): () => void {
+  const es = new EventSource(`${API_BASE}/connectors/events`, { withCredentials: false });
+  es.onmessage = (ev) => {
+    try {
+      onMessage(JSON.parse(ev.data));
+    } catch {
+      /* 忽略坏帧 */
+    }
+  };
+  return () => es.close();
+}
+
+// ── Agent API Key（批次 3）───────────────────────────────
+export interface AgentAPIKey {
+  id: number;
+  agent_id: number;
+  name: string;
+  key_prefix: string;
+  enabled: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface AgentAPIKeyCreated extends AgentAPIKey {
+  key: string; // 明文仅此一次
+}
+
+export async function listAgentAPIKeys(agentId: number): Promise<AgentAPIKey[]> {
+  return request<AgentAPIKey[]>(`/agents/${agentId}/api-keys`);
+}
+
+export async function createAgentAPIKey(
   agentId: number,
   name: string,
-  enabled: boolean,
-): Promise<unknown> {
-  return request(`/agents/${agentId}/mcp/${encodeURIComponent(name)}/enabled`, {
-    method: "PUT",
-    body: JSON.stringify({ enabled }),
+): Promise<AgentAPIKeyCreated> {
+  return request<AgentAPIKeyCreated>(`/agents/${agentId}/api-keys`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
   });
+}
+
+export async function updateAgentAPIKey(
+  agentId: number,
+  keyId: number,
+  body: { enabled?: boolean; name?: string },
+): Promise<AgentAPIKey> {
+  return request<AgentAPIKey>(`/agents/${agentId}/api-keys/${keyId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteAgentAPIKey(agentId: number, keyId: number): Promise<void> {
+  return request<void>(`/agents/${agentId}/api-keys/${keyId}`, { method: "DELETE" });
 }
 
 // ── 模型模板 ──────────────────────────────────────────────
 export interface ModelTemplate {
   id: number;
   name: string;
+  owner_id: number;
   model: string;
   provider: string;
   base_url: string | null;
   has_api_key: boolean;
   description: string | null;
+  is_shared: boolean;
   created_at: string | null;
 }
 
@@ -365,9 +651,27 @@ export async function createModelTemplate(body: {
   base_url?: string;
   api_key?: string;
   description?: string;
+  is_shared?: boolean;
 }): Promise<ModelTemplate> {
   return request<ModelTemplate>("/models", {
     method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateModelTemplate(
+  id: number,
+  body: {
+    model?: string;
+    provider?: string;
+    base_url?: string;
+    api_key?: string;
+    description?: string;
+    is_shared?: boolean;
+  },
+): Promise<ModelTemplate> {
+  return request<ModelTemplate>(`/models/${id}`, {
+    method: "PATCH",
     body: JSON.stringify(body),
   });
 }
