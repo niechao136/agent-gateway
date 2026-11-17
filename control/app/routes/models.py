@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -31,6 +31,7 @@ class TemplateIn(BaseModel):
     base_url: str | None = Field(default=None, max_length=512)
     api_key: str | None = Field(default=None, max_length=512)
     description: str | None = None
+    is_shared: bool = False
 
 
 class TemplateUpdateIn(BaseModel):
@@ -39,6 +40,7 @@ class TemplateUpdateIn(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     description: str | None = None
+    is_shared: bool | None = None
 
 
 class TemplateOut(BaseModel):
@@ -50,6 +52,7 @@ class TemplateOut(BaseModel):
     base_url: str | None
     has_api_key: bool
     description: str | None
+    is_shared: bool
     created_at: datetime | None
 
     model_config = {"from_attributes": True}
@@ -65,6 +68,7 @@ def _out(t: ModelTemplate) -> TemplateOut:
         base_url=t.base_url,
         has_api_key=bool(t.api_key),
         description=t.description,
+        is_shared=t.is_shared,
         created_at=t.created_at,
     )
 
@@ -74,9 +78,13 @@ async def list_templates(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[TemplateOut]:
-    stmt = select(ModelTemplate).order_by(ModelTemplate.id)
-    if user.role != UserRole.ADMIN:
-        stmt = stmt.where(ModelTemplate.owner_id == user.id)
+    """我的 + 共享的；admin 看全部。"""
+    if user.role == UserRole.ADMIN:
+        stmt = select(ModelTemplate).order_by(ModelTemplate.id)
+    else:
+        stmt = select(ModelTemplate).where(
+            or_(ModelTemplate.owner_id == user.id, ModelTemplate.is_shared == True)  # noqa: E712
+        ).order_by(ModelTemplate.id)
     rows = (await session.execute(stmt)).scalars().all()
     return [_out(t) for t in rows]
 
@@ -101,6 +109,7 @@ async def create_template(
         api_key=body.api_key,
         description=body.description,
         owner_id=user.id,
+        is_shared=body.is_shared and user.role == UserRole.ADMIN,
     )
     session.add(t)
     await session.commit()
@@ -127,6 +136,10 @@ async def update_template(
         v = getattr(body, field)
         if v is not None:
             setattr(t, field, v)
+    if body.is_shared is not None:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "共享/取消共享需要管理员")
+        t.is_shared = body.is_shared
 
     await session.commit()
     await session.refresh(t)
@@ -171,7 +184,8 @@ async def apply_template(
     ).scalar_one_or_none()
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
-    if not can_modify(user, t.owner_id):
+    # 应用权限：本人的 或 共享的（共享模板可绑定但不可改删）
+    if t.owner_id != user.id and not t.is_shared:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "无权使用他人的模板")
 
     try:

@@ -17,9 +17,9 @@ from .config import get_settings
 from .database import get_session_factory, init_models
 from .models import User, UserRole
 from .routes import (
+    a2a as a2a_routes,
     a2a_inbound,
     agent_a2a,
-    agent_mcp,
     agent_skills,
     agents,
     auth,
@@ -100,6 +100,8 @@ app.include_router(agents.router)          # /api/agents
 app.include_router(agents.chat_router)     # /api/chat/agents
 app.include_router(mcp_routes.router)      # /api/mcp
 app.include_router(mcp_routes.agent_router)  # /api/agents/{id}/mcp
+app.include_router(a2a_routes.router)      # /api/a2a/endpoints
+app.include_router(a2a_routes.agent_router)  # /api/agents/{id}/a2a
 app.include_router(agent_skills.router)
 app.include_router(agent_a2a.router)
 app.include_router(agent_mcp.router)
