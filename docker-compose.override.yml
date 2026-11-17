@@ -1,0 +1,14 @@
+# 服务器部署覆盖：移除隧道挂载（服务器可直连 Google）
+services:
+  hermes:
+    volumes:
+      - ${HERMES_DATA_DIR}:/opt/data
+    mem_limit: 1200m
+  control:
+    mem_limit: 384m
+  web:
+    mem_limit: 256m
+  postgres:
+    mem_limit: 256m
+  nginx:
+    mem_limit: 64m
