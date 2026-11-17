@@ -2,304 +2,227 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import AppBar from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import Typography from "@mui/material/Typography";
-import Container from "@mui/material/Container";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Chip from "@mui/material/Chip";
-import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
 import Box from "@mui/material/Box";
-import Alert from "@mui/material/Alert";
-import CircularProgress from "@mui/material/CircularProgress";
+import Button from "@mui/material/Button";
+import Card from "@mui/material/Card";
+import CardActions from "@mui/material/CardActions";
+import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
 import Dialog from "@mui/material/Dialog";
-import DialogTitle from "@mui/material/DialogTitle";
-import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
-import TextField from "@mui/material/TextField";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
-import DeleteIcon from "@mui/icons-material/Delete";
-import EditIcon from "@mui/icons-material/Edit";
+import SmartToyIcon from "@mui/icons-material/SmartToy";
 import {
   ApiError,
   createAgent,
-  deleteAgent,
-  listAllAgents,
+  listAgents,
   publishAgent,
   unpublishAgent,
   type Agent,
 } from "@/lib/api";
+import { ConfirmDialog, EmptyState, SkeletonList } from "@/components/Common";
 import { GuardedShell } from "@/lib/authGuard";
-import { AdminNav } from "@/components/AdminNav";
+import { AdminShell } from "@/components/AdminShell";
 
-export default function AdminPage() {
-  return (
-    <GuardedShell require="admin">
-      <AdminAgents />
-    </GuardedShell>
-  );
+function StatusChip({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: "success" | "default" }> = {
+    published: { label: "已发布", color: "success" },
+    draft: { label: "草稿", color: "default" },
+  };
+  const c = map[status] ?? { label: status, color: "default" as const };
+  return <Chip size="small" label={c.label} color={c.color} variant="outlined" />;
 }
 
-function AdminAgents() {
+function AgentsInner() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [form, setForm] = useState({ slug: "", name: "", description: "" });
+  const [busy, setBusy] = useState(false);
 
-  const reload = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      setAgents(await listAllAgents());
+      setAgents(await listAgents());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
-      setAgents([]);
     }
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void load();
+  }, [load]);
 
-  async function toggle(a: Agent) {
-    try {
-      if (a.status === "published") await unpublishAgent(a.id);
-      else await publishAgent(a.id);
-      await reload();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "操作失败");
-    }
-  }
-
-  async function remove(a: Agent) {
-    if (!confirm(`删除 Agent「${a.name}」？对应的 hermes profile 也会被删除。`)) return;
-    try {
-      await deleteAgent(a.id);
-      await reload();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "删除失败");
-    }
-  }
-
-  return (
-    <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-      <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Toolbar>
-          <Typography variant="h6" sx={{ fontWeight: 700, flexGrow: 1 }}>
-            管理中心
-          </Typography>
-          <AdminNav current="agents" />
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 700, flexGrow: 1 }}>
-            Agent 列表
-          </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
-            新建 Agent
-          </Button>
-        </Box>
-
-        {error ? (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        ) : null}
-
-        {agents === null ? (
-          <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-            <CircularProgress />
-          </Box>
-        ) : agents.length === 0 ? (
-          <Alert severity="info">还没有 Agent。点右上角「新建 Agent」开始。</Alert>
-        ) : (
-          <Table size="small" sx={{ bgcolor: "background.paper" }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>名称</TableCell>
-                <TableCell>slug</TableCell>
-                <TableCell>状态</TableCell>
-                <TableCell>禁用工具组</TableCell>
-                <TableCell>profile</TableCell>
-                <TableCell align="right">操作</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {agents.map((a) => (
-                <TableRow key={a.id} hover>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {a.name}
-                    </Typography>
-                    {a.description ? (
-                      <Typography variant="caption" color="text.secondary">
-                        {a.description}
-                      </Typography>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <code>{a.slug}</code>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      label={a.status === "published" ? "已发布" : "草稿"}
-                      color={a.status === "published" ? "success" : "default"}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="caption">
-                      {a.disabled_toolsets.length ? a.disabled_toolsets.join(", ") : "（全开）"}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="caption">{a.profile_name}</Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => void toggle(a)}>
-                      {a.status === "published" ? "下线" : "发布"}
-                    </Button>
-                    <IconButton
-                      size="small"
-                      aria-label="编辑"
-                      onClick={() => router.push(`/admin/agents/${a.id}/edit`)}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" aria-label="删除" onClick={() => void remove(a)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Container>
-
-      <CreateAgentDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        onCreated={async () => {
-          setOpen(false);
-          await reload();
-        }}
-        onError={setError}
-      />
-    </Box>
-  );
-}
-
-function CreateAgentDialog({
-  open,
-  onClose,
-  onCreated,
-  onError,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: () => void | Promise<void>;
-  onError: (msg: string) => void;
-}) {
-  const [slug, setSlug] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [soul, setSoul] = useState("");
-  // v2：disabled_toolsets 直接编辑；空数组 = 全放开（谨慎），缺省由后端给只读助手默认集
-  const [disabled, setDisabled] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  function reset() {
-    setSlug("");
-    setName("");
-    setDescription("");
-    setSoul("");
-    setDisabled([]);
-  }
-
-  async function submit() {
+  async function submitCreate() {
     setBusy(true);
     try {
-      await createAgent({
-        slug: slug.trim(),
-        name: name.trim(),
-        description: description.trim() || undefined,
-        soul: soul.trim() || undefined,
-        // 前端不传 = 后端给只读助手默认集；传空数组 = 明确全开
-        disabled_toolsets: disabled.length ? disabled : undefined,
+      const a = await createAgent({
+        slug: form.slug.trim(),
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
       });
-      reset();
-      await onCreated();
+      setCreateOpen(false);
+      setForm({ slug: "", name: "", description: "" });
+      router.push(`/admin/agents/${a.id}/edit`);
     } catch (e) {
-      onError(e instanceof ApiError ? e.message : "创建失败");
+      setError(e instanceof ApiError ? e.message : "创建失败");
     } finally {
       setBusy(false);
     }
   }
 
+  async function togglePublish(a: Agent) {
+    try {
+      if (a.status === "published") await unpublishAgent(a.id);
+      else await publishAgent(a.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "操作失败");
+    }
+  }
+
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>新建 Agent</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField
-            label="名称"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            autoFocus
-          />
-          <TextField
-            label="slug"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            required
-            helperText="小写字母/数字/连字符，用于 URL。创建后不可改。"
-          />
-          <TextField
-            label="描述"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            multiline
-            minRows={2}
-          />
-          <TextField
-            label="System Prompt（SOUL.md）"
-            value={soul}
-            onChange={(e) => setSoul(e.target.value)}
-            multiline
-            minRows={4}
-            helperText="留空则用「你是「{名称}」」的默认模板"
-          />
-          <TextField
-            label="禁用的工具组（逗号分隔，留空 = 只读助手默认集）"
-            value={disabled.join(", ")}
-            onChange={(e) =>
-              setDisabled(
-                e.target.value
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              )
-            }
-            helperText="例如 terminal, browser。留空使用安全的默认集（禁 terminal/file/browser 等）。"
-          />
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={busy}>
-          取消
+    <Stack spacing={2}>
+      <Stack direction="row" alignItems="center" spacing={2}>
+        <Typography variant="h5" sx={{ flexGrow: 1 }}>
+          Agent
+        </Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+          新建 Agent
         </Button>
-        <Button variant="contained" onClick={() => void submit()} disabled={busy || !slug || !name}>
-          {busy ? "创建中…" : "创建"}
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </Stack>
+
+      {error ? <Typography color="error">{error}</Typography> : null}
+
+      {agents === null ? (
+        <SkeletonList rows={3} />
+      ) : agents.length === 0 ? (
+        <EmptyState
+          icon={<SmartToyIcon fontSize="inherit" />}
+          title="还没有 Agent"
+          hint="创建第一个 Agent：命名、配置人格与工具，发布后即可对话。"
+          action={
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+              新建 Agent
+            </Button>
+          }
+        />
+      ) : (
+        <Grid container spacing={2}>
+          {agents.map((a) => (
+            <Grid key={a.id} size={{ xs: 12, sm: 6, lg: 4 }}>
+              <Card sx={{ height: "100%" }}>
+                <CardContent>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ flexGrow: 1, noWrap: true }}>
+                      {a.name}
+                    </Typography>
+                    <StatusChip status={a.status} />
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, minHeight: 32 }}>
+                    {a.description || "（无描述）"}
+                  </Typography>
+                  <Typography variant="caption" color="text.disabled" sx={{ fontFamily: "monospace" }}>
+                    {a.profile_name}
+                  </Typography>
+                </CardContent>
+                <CardActions>
+                  <Button size="small" onClick={() => router.push(`/admin/agents/${a.id}/edit`)}>
+                    编辑
+                  </Button>
+                  <Button size="small" onClick={() => router.push(`/chat/${a.slug}`)}>
+                    对话
+                  </Button>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button size="small" onClick={() => void togglePublish(a)}>
+                    {a.status === "published" ? "取消发布" : "发布"}
+                  </Button>
+                  <Button size="small" color="error" onClick={() => setConfirmId(a.id)}>
+                    删除
+                  </Button>
+                </CardActions>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      {/* 新建对话框 */}
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>新建 Agent</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="slug（URL 标识）"
+              value={form.slug}
+              onChange={(e) => setForm({ ...form, slug: e.target.value })}
+              helperText="小写字母数字连字符，全局唯一"
+            />
+            <TextField
+              label="名称"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+            <TextField
+              label="描述"
+              multiline
+              rows={2}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+            <Typography variant="caption" color="text.secondary">
+              创建后进入编辑页配置人格、工具与模型。默认启用安全的只读助手工具预设。
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)}>取消</Button>
+          <Button
+            variant="contained"
+            disabled={busy || !form.slug.trim() || !form.name.trim()}
+            onClick={() => void submitCreate()}
+          >
+            创建
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 删除确认 */}
+      <ConfirmDialog
+        open={confirmId !== null}
+        danger
+        title="删除 Agent"
+        message="将删除 profile 与全部会话数据，不可恢复。"
+        confirmText="删除"
+        onConfirm={async () => {
+          if (confirmId === null) return;
+          const { deleteAgent } = await import("@/lib/api");
+          try {
+            await deleteAgent(confirmId);
+            await load();
+          } catch (e) {
+            setError(e instanceof ApiError ? e.message : "删除失败");
+          }
+        }}
+        onClose={() => setConfirmId(null)}
+      />
+    </Stack>
+  );
+}
+
+export default function AdminAgentsPage() {
+  return (
+    <GuardedShell>
+      <AdminShell>
+        <AgentsInner />
+      </AdminShell>
+    </GuardedShell>
   );
 }
