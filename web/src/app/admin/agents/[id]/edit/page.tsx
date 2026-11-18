@@ -35,17 +35,20 @@ import {
   getAgentMCP,
   listA2AEndpoints,
   listAgentAPIKeys,
+  listAgentBuiltinSkills,
   listAgentSkillBindings,
   listMCPServers,
   listModelTemplates,
   listSkills,
   setAgentA2A,
+  setAgentBuiltinSkills,
   setAgentMCP,
   updateAgent,
   updateAgentAPIKey,
   type A2AEndpoint,
   type Agent,
   type AgentAPIKey,
+  type AgentBuiltinSkill,
   type CustomSkill,
   type MCPServer,
   type ModelTemplate,
@@ -82,9 +85,11 @@ function EditInner() {
   const [newMcpOpen, setNewMcpOpen] = useState(false);
   const [newMcp, setNewMcp] = useState({ name: "", url: "", token: "" });
 
-  // Skill 绑定
+  // Skill 绑定（内置与自定义完全独立的 state，避免高亮串台）
   const [skillsAll, setSkillsAll] = useState<CustomSkill[]>([]);
   const [skillBound, setSkillBound] = useState<number[]>([]);
+  const [builtinSkills, setBuiltinSkills] = useState<AgentBuiltinSkill[]>([]);
+  const [builtinSelected, setBuiltinSelected] = useState<string[]>([]);
 
   // A2A 绑定
   const [a2aAll, setA2aAll] = useState<A2AEndpoint[]>([]);
@@ -104,7 +109,7 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind] = await Promise.all([
+      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs] = await Promise.all([
         listModelTemplates().catch(() => []),
         listMCPServers().catch(() => []),
         getAgentMCP(id).catch(() => ({ bound: [] as MCPServer[] })),
@@ -113,6 +118,7 @@ function EditInner() {
         listAgentSkillBindings(id).catch(() => ({ bound: [] as CustomSkill[] })),
         listA2AEndpoints().catch(() => []),
         getAgentA2A(id).catch(() => ({ bound: [] as A2AEndpoint[] })),
+        listAgentBuiltinSkills(id).catch(() => ({ skills: [] as AgentBuiltinSkill[] })),
       ]);
       setTemplates(tpl);
       setMcpAll(mcp);
@@ -122,6 +128,8 @@ function EditInner() {
       setSkillBound((skBind.bound ?? []).map((s) => s.id));
       setA2aAll(a2aAllR);
       setA2aBound((a2aBind.bound ?? []).map((e) => e.id));
+      setBuiltinSkills(bs.skills ?? []);
+      setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
     }
@@ -192,6 +200,17 @@ function EditInner() {
       setError(e instanceof ApiError ? e.message : "新建并绑定失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveBuiltin(names: string[]) {
+    setBuiltinSelected(names); // 立即反馈，独立 state 不影响自定义
+    try {
+      const r = await setAgentBuiltinSkills(id, names);
+      if (r.errors.length) setError(`部分内置 Skill 同步失败：${r.errors.join("; ")}`);
+      else setOk("内置 Skill 选择已同步到 profile");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "内置 Skill 同步失败");
     }
   }
 
@@ -404,6 +423,44 @@ function EditInner() {
         <Card>
           <CardContent>
             <Stack spacing={1.5}>
+              {/* 内置 Skill：独立 state（字符串名），默认全不选 */}
+              <Divider textAlign="left">
+                <Typography variant="body2" color="text.secondary">
+                  内置 Skill（默认全不选）
+                </Typography>
+              </Divider>
+              {builtinSkills.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  hermes 未提供内置 Skill 列表（dashboard 不可用）。
+                </Typography>
+              ) : (
+                builtinSkills.map((bs) => (
+                  <FormControlLabel
+                    key={bs.name}
+                    control={
+                      <Checkbox
+                        checked={builtinSelected.includes(bs.name)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...builtinSelected, bs.name]
+                            : builtinSelected.filter((n) => n !== bs.name);
+                          void saveBuiltin(next);
+                        }}
+                      />
+                    }
+                    label={
+                      <ListItemText primary={bs.name} secondary={bs.description ?? ""} />
+                    }
+                  />
+                ))
+              )}
+
+              {/* 自定义 Skill：独立 state（数字 ID） */}
+              <Divider textAlign="left">
+                <Typography variant="body2" color="text.secondary">
+                  自定义 Skill
+                </Typography>
+              </Divider>
               <Typography variant="subtitle1">已绑定的自定义 Skill</Typography>
               {skillsAll.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
@@ -434,8 +491,8 @@ function EditInner() {
                 ))
               )}
               <Typography variant="caption" color="text.secondary">
-                绑定后 Skill 写入该 Agent 的 profile（含 references/scripts/templates/assets）。
-                内置 Skill 的启停在「内置 Skill」页管理。
+                两类 Skill 独立管理：内置 Skill 按名称选择，自定义 Skill 按 ID 绑定；
+                自定义 Skill 写入该 Agent 的 profile（含 references/scripts/templates/assets）。
               </Typography>
             </Stack>
           </CardContent>

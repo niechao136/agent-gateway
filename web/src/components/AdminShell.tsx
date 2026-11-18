@@ -31,9 +31,11 @@ import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import MenuIcon from "@mui/icons-material/Menu";
 import LogoutIcon from "@mui/icons-material/Logout";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import ChatIcon from "@mui/icons-material/Chat";
 import { getRole, getStoredUser, logout } from "@/lib/api";
 import { useColorMode } from "@/lib/theme";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import type { Role } from "@/lib/api";
 
 const DRAWER_WIDTH = 240;
@@ -68,6 +70,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("md"));
   const { mode, toggle } = useColorMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const role: Role | null = getRole();
   const user = getStoredUser();
@@ -154,6 +157,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 color={role === "admin" ? "primary" : "default"}
                 variant="outlined"
               />
+              <Tooltip title="修改密码">
+                <IconButton size="small" onClick={() => setPasswordOpen(true)}>
+                  <LockOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
               <IconButton
                 size="small"
                 onClick={() => {
@@ -194,6 +202,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <Toolbar />
         {children}
       </Box>
+      <ChangePasswordDialog
+        open={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+      />
     </Box>
   );
 }

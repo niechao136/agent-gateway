@@ -106,19 +106,23 @@ async def test_change_role(client, atok, monkeypatch):
     assert (await client.get("/api/admin/users", headers=_h(utok))).status_code == 403
 
 
-async def test_cannot_demote_last_admin(client, atok, monkeypatch):
+async def test_cannot_change_own_role(client, atok, monkeypatch):
+    """新规则（修复 7）：任何管理员都不能改自己的角色，先于"最后一名管理员"判定。"""
     users = (await client.get("/api/admin/users", headers=_h(atok))).json()
-    root = next(u for u in users if u["role"] == "admin" and u["username"] == "testadmin")
+    me = next(u for u in users if u["username"] == "testadmin")
     r = await client.patch(
-        f"/api/admin/users/{root['id']}", headers=_h(atok), json={"role": "user"}
+        f"/api/admin/users/{me['id']}", headers=_h(atok), json={"role": "user"}
     )
-    assert r.status_code == 409
+    assert r.status_code == 403
+    assert "自己的权限" in r.json()["detail"]
 
 
 async def test_invalid_role_422(client, atok, monkeypatch):
-    uid = (await client.get("/api/admin/users", headers=_h(atok))).json()[0]["id"]
+    await _user(client, "rolecheck")
+    users = (await client.get("/api/admin/users", headers=_h(atok))).json()
+    target = next(u for u in users if u["username"] == "rolecheck")
     r = await client.patch(
-        f"/api/admin/users/{uid}", headers=_h(atok), json={"role": "superadmin"}
+        f"/api/admin/users/{target['id']}", headers=_h(atok), json={"role": "superadmin"}
     )
     assert r.status_code == 422
 

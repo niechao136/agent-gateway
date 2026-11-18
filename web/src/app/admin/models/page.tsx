@@ -23,6 +23,7 @@ import {
   deleteModelTemplate,
   getRole,
   listModelTemplates,
+  testModelTemplate,
   updateModelTemplate,
   type ModelTemplate,
 } from "@/lib/api";
@@ -156,6 +157,25 @@ function ModelsInner() {
                   {t.has_api_key ? (
                     <Chip size="small" color="success" variant="outlined" label="已配置密钥" />
                   ) : null}
+                  <Button
+                    size="small"
+                    onClick={async () => {
+                      try {
+                        const r = await testModelTemplate(t.id);
+                        if (r.ok) {
+                          setOk(
+                            `测试通过：${r.detail}${r.models?.length ? `（可用模型：${r.models.slice(0, 3).join(", ")}）` : ""}`,
+                          );
+                        } else {
+                          setError(`测试失败：${r.detail}`);
+                        }
+                      } catch (e) {
+                        setError(e instanceof ApiError ? e.message : "测试失败");
+                      }
+                    }}
+                  >
+                    测试
+                  </Button>
                   <Button
                     size="small"
                     sx={{ ml: "auto" }}

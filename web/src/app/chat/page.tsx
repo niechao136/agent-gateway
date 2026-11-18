@@ -16,6 +16,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import ChatIcon from "@mui/icons-material/Chat";
 import LogoutIcon from "@mui/icons-material/Logout";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
@@ -30,6 +31,7 @@ import {
 } from "@/lib/api";
 import { useColorMode } from "@/lib/theme";
 import { GuardedShell } from "@/lib/authGuard";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 
 export default function ChatIndexPage() {
   return (
@@ -45,6 +47,7 @@ function AgentPicker() {
   const isAdmin = getRole() === "admin";
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => {
     listVisibleAgents()
@@ -73,6 +76,12 @@ function AgentPicker() {
               管理中心
             </Button>
           ) : null}
+          <Button
+            startIcon={<LockOutlinedIcon />}
+            onClick={() => setPasswordOpen(true)}
+          >
+            修改密码
+          </Button>
           <Button
             startIcon={<LogoutIcon />}
             onClick={() => {
@@ -131,6 +140,10 @@ function AgentPicker() {
           </Grid>
         )}
       </Container>
+      <ChangePasswordDialog
+        open={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+      />
     </Box>
   );
 }

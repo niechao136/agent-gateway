@@ -160,6 +160,19 @@ export async function me(): Promise<UserInfo> {
   return request<UserInfo>("/auth/me");
 }
 
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean }> {
+  return request("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
 export function logout(): void {
   clearSession();
 }
@@ -290,6 +303,29 @@ export interface BuiltinSkill {
 
 export async function listBuiltinSkills(): Promise<BuiltinSkill[]> {
   return request<BuiltinSkill[]>("/skills/builtin");
+}
+
+/** 某 Agent 的内置 Skill 选择（默认全不选）。 */
+export interface AgentBuiltinSkill {
+  name: string;
+  description: string | null;
+  selected: boolean;
+}
+
+export async function listAgentBuiltinSkills(
+  agentId: number,
+): Promise<{ agent_id: number; profile: string; skills: AgentBuiltinSkill[] }> {
+  return request(`/agents/${agentId}/skills/builtin`);
+}
+
+export async function setAgentBuiltinSkills(
+  agentId: number,
+  skillNames: string[],
+): Promise<{ agent_id: number; selected: string[]; changed: string[]; errors: string[] }> {
+  return request(`/agents/${agentId}/skills/builtin`, {
+    method: "PUT",
+    body: JSON.stringify({ skill_names: skillNames }),
+  });
 }
 
 export async function toggleBuiltinSkill(
@@ -670,6 +706,17 @@ export async function createModelTemplate(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  detail: string;
+  status?: number;
+  models?: string[];
+}
+
+export async function testModelTemplate(id: number): Promise<ModelTestResult> {
+  return request(`/models/${id}/test`, { method: "POST" });
 }
 
 export async function updateModelTemplate(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -16,6 +16,8 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import {
   ApiError,
   createSkill,
@@ -58,6 +60,65 @@ function SkillsInner() {
   const [files, setFiles] = useState<SkillFile[]>([]);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dirInputRef = useRef<HTMLInputElement>(null);
+  const [uploadDir, setUploadDir] = useState<FileDir>("references");
+
+  /** 读取 File 为 UTF-8 文本（二进制文件跳过）；单文件上限 1MB。 */
+  async function readFiles(
+    fileList: FileList | null,
+    pathOf: (file: File) => string,
+  ): Promise<{ added: SkillFile[]; skipped: string[] }> {
+    const added: SkillFile[] = [];
+    const skipped: string[] = [];
+    if (!fileList) return { added, skipped };
+    for (const file of Array.from(fileList)) {
+      const path = pathOf(file).replace(/\\/g, "/"); // 统一斜杠
+      if (file.size > 1024 * 1024) {
+        skipped.push(`${path}（超过 1MB）`);
+        continue;
+      }
+      try {
+        const content = await file.text(); // 按 UTF-8 读取
+        added.push({ path, content });
+      } catch {
+        skipped.push(`${path}（无法按文本读取）`);
+      }
+    }
+    return { added, skipped };
+  }
+
+  async function onFilesChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const { added, skipped } = await readFiles(
+      e.target.files,
+      (f) => `${uploadDir}/${f.name}`,
+    );
+    // 同路径覆盖
+    setFiles((prev) => {
+      const next = prev.filter((p) => !added.some((a) => a.path === p.path));
+      return [...next, ...added];
+    });
+    if (skipped.length) setError(`已跳过无法上传的文件：${skipped.join(", ")}`);
+    e.target.value = ""; // 允许重复选同一文件
+  }
+
+  async function onDirChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const { added, skipped } = await readFiles(e.target.files, (f) => {
+      // webkitRelativePath 形如 "myfolder/references/api.md"，取目录部分
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+      const parts = rel.split("/");
+      // 保留从白名单目录开始的路径
+      const idx = parts.findIndex((p) => FILE_DIRS.includes(p as FileDir));
+      if (idx >= 0) return parts.slice(idx).join("/");
+      return `references/${f.name}`;
+    });
+    setFiles((prev) => {
+      const next = prev.filter((p) => !added.some((a) => a.path === p.path));
+      return [...next, ...added];
+    });
+    if (skipped.length) setError(`已跳过无法上传的文件：${skipped.join(", ")}`);
+    e.target.value = "";
+  }
 
   const load = useCallback(async () => {
     try {
@@ -210,16 +271,63 @@ function SkillsInner() {
                 <Button
                   key={dir}
                   size="small"
-                  variant="outlined"
+                  variant={uploadDir === dir ? "contained" : "outlined"}
                   startIcon={<AddIcon />}
-                  onClick={() => addFile(dir)}
+                  onClick={() => {
+                    setUploadDir(dir);
+                    addFile(dir);
+                  }}
                 >
                   {dir}/
                 </Button>
               ))}
             </Stack>
+            {/* 上传文件 / 整个目录（仿 a2a-gateway） */}
+            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", alignItems: "center" }}>
+              <Typography variant="caption" color="text.secondary">
+                上传到
+              </Typography>
+              {FILE_DIRS.map((dir) => (
+                <Button
+                  key={`up-${dir}`}
+                  size="small"
+                  onClick={() => {
+                    setUploadDir(dir);
+                    fileInputRef.current?.click();
+                  }}
+                  startIcon={<UploadFileIcon />}
+                >
+                  {dir}
+                </Button>
+              ))}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<FolderOpenIcon />}
+                onClick={() => dirInputRef.current?.click()}
+              >
+                上传整个目录
+              </Button>
+            </Stack>
+            {/* 隐藏的 file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => void onFilesChosen(e)}
+            />
+            <input
+              ref={dirInputRef}
+              type="file"
+              multiple
+              hidden
+              {...({ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+              onChange={(e) => void onDirChosen(e)}
+            />
             <Typography variant="caption" color="text.secondary">
-              scripts/ 下的脚本需要 terminal toolset 才能运行；禁用 terminal 的 Agent 会自动剥离脚本并隐藏该 Skill（SPEC 6.5）。
+              上传为 UTF-8 文本，单文件上限 1MB；整个目录上传会保留 references/scripts 等层级。
+              scripts/ 下的脚本需要 terminal toolset 才能运行；禁用 terminal 的 Agent 会自动剥离脚本。
             </Typography>
 
             {files.map((f, idx) => (

@@ -14,7 +14,14 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { ApiError, listUsers, updateUser, type AdminUser, type Role } from "@/lib/api";
+import {
+  ApiError,
+  getStoredUser,
+  listUsers,
+  updateUser,
+  type AdminUser,
+  type Role,
+} from "@/lib/api";
 import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
 import { ConfirmDialog, SkeletonList } from "@/components/Common";
@@ -30,6 +37,7 @@ export default function AdminUsersPage() {
 }
 
 function UsersView() {
+  const currentUser = getStoredUser();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -114,6 +122,7 @@ function UsersView() {
                       select
                       size="small"
                       value={u.role}
+                      disabled={currentUser?.id === u.id}
                       onChange={(e) => {
                         const role = e.target.value as Role;
                         if (role === "user" && u.role === "admin") {
@@ -123,6 +132,7 @@ function UsersView() {
                         }
                       }}
                       sx={{ width: 110 }}
+                      helperText={currentUser?.id === u.id ? "不能改自己" : undefined}
                     >
                       <MenuItem value="user">用户</MenuItem>
                       <MenuItem value="admin">管理员</MenuItem>
@@ -147,6 +157,7 @@ function UsersView() {
                   <Switch
                     size="small"
                     checked={!u.disabled}
+                    disabled={currentUser?.id === u.id}
                     onChange={() => void toggleDisabled(u)}
                     slotProps={{ input: { "aria-label": `启用 ${u.username}` } }}
                   />

@@ -21,6 +21,7 @@ import Tooltip from "@mui/material/Tooltip";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import MenuIcon from "@mui/icons-material/Menu";
 import SendIcon from "@mui/icons-material/Send";
@@ -37,6 +38,7 @@ import {
 } from "@/lib/api";
 import { GuardedShell } from "@/lib/authGuard";
 import { useColorMode } from "@/lib/theme";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { streamChat } from "@/lib/sse";
 import type { ChatMessage } from "@/lib/chatTypes";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -53,6 +55,7 @@ function ChatView() {
   const router = useRouter();
   const { mode, toggle } = useColorMode();
   const isAdmin = getRole() === "admin";
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const params = useParams<{ slug: string; threadId?: string }>();
   const slug = params.slug;
   const urlThreadId = params.threadId ? Number(params.threadId) : null;
@@ -239,6 +242,11 @@ function ChatView() {
               </IconButton>
             </Tooltip>
           ) : null}
+          <Tooltip title="修改密码">
+            <IconButton onClick={() => setPasswordOpen(true)} size="small">
+              <LockOutlinedIcon />
+            </IconButton>
+          </Tooltip>
           <IconButton onClick={() => setDrawer(true)} aria-label="会话列表">
             <MenuIcon />
           </IconButton>
@@ -351,6 +359,10 @@ function ChatView() {
           </List>
         </Box>
       </Drawer>
+      <ChangePasswordDialog
+        open={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+      />
     </Box>
   );
 }
