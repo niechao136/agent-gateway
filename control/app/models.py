@@ -290,6 +290,26 @@ class BuiltinSkillState(Base):
     )
 
 
+class AgentBuiltinSkill(Base):
+    """Agent ↔ 内置 Skill 选择（按 Agent 隔离，SPEC 修复）。
+
+    hermes 的 skill 开关本来就是按 profile 隔离的；这里在控制层记录
+    每个 Agent 选了哪些内置技能，默认全不选。勾选时对该 profile 调
+    hermes toggle，取消时同理。与自定义 Skill 用完全独立的表/ID 空间。
+    """
+
+    __tablename__ = "agent_builtin_skills"
+    __table_args__ = (
+        Index("ix_agent_builtin_skill_pair", "agent_id", "skill_name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    skill_name: Mapped[str] = mapped_column(String(64), index=True)
+
+
 # ── 批次 3：对外 API ──────────────────────────────────────
 class AgentAPIKey(Base):
     """对外 API Key：按 Agent 隔离（SPEC-v2 决策）。

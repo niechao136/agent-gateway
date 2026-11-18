@@ -21,6 +21,7 @@ from ..hermes.skill_sync import SkillSyncError, apply_custom_skills, remove_skil
 from ..hermes.skills import SkillError, list_skills, toggle_skill
 from ..models import (
     Agent,
+    AgentBuiltinSkill,
     AgentCustomSkill,
     BuiltinSkillState,
     CustomSkill,
@@ -331,6 +332,118 @@ async def delete_skill(
 
     await session.delete(s)
     await session.commit()
+
+
+# ── Agent 内置 Skill 选择（按 Agent 隔离，默认全不选）──────
+@agent_router.get("/{agent_id}/skills/builtin")
+async def list_agent_builtin_skills(
+    agent_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """列出该 Agent 可选的内置 Skill，附 selected 状态。
+
+    内置技能列表来自 hermes dashboard（GET /api/skills）；默认全不选。
+    与自定义 Skill 用独立的 AgentBuiltinSkill 表，ID 空间互不干扰。
+    """
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    selected = set(
+        (
+            await session.execute(
+                select(AgentBuiltinSkill.skill_name).where(
+                    AgentBuiltinSkill.agent_id == agent_id
+                )
+            )
+        ).scalars().all()
+    )
+    try:
+        available = await list_skills(agent.profile_name)
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    items = []
+    for s in available:
+        name = s.get("name") or ""
+        if not name:
+            continue
+        items.append(
+            {
+                "name": name,
+                "description": s.get("description"),
+                "selected": name in selected,
+            }
+        )
+    return {"agent_id": agent_id, "profile": agent.profile_name, "skills": items}
+
+
+@agent_router.put("/{agent_id}/skills/builtin")
+async def set_agent_builtin_skills(
+    agent_id: int,
+    body: dict,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """整体替换该 Agent 选中的内置 Skill：body = {"skill_names": [...]}。
+
+    对差异项逐个调 hermes toggle（内置技能按 profile 隔离），
+    并更新控制层记录。默认全不选 = 传空数组 = 全部关闭。
+    """
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    names = body.get("skill_names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "skill_names 必须是字符串数组")
+    want = set(names)
+
+    old_rows = (
+        await session.execute(
+            select(AgentBuiltinSkill).where(AgentBuiltinSkill.agent_id == agent_id)
+        )
+    ).scalars().all()
+    old = {r.skill_name for r in old_rows}
+
+    changed: list[str] = []
+    errors: list[str] = []
+
+    # 取消选择：从表里移除 + hermes 关闭
+    for r in old_rows:
+        if r.skill_name not in want:
+            try:
+                await toggle_skill(agent.profile_name, r.skill_name, False)
+            except SkillError as exc:
+                errors.append(f"关闭 {r.skill_name}: {exc}")
+            await session.delete(r)
+            changed.append(r.skill_name)
+
+    # 新增选择：写表 + hermes 开启
+    for name in want - old:
+        session.add(AgentBuiltinSkill(agent_id=agent_id, skill_name=name))
+        try:
+            await toggle_skill(agent.profile_name, name, True)
+        except SkillError as exc:
+            errors.append(f"开启 {name}: {exc}")
+        changed.append(name)
+
+    await session.commit()
+    return {
+        "agent_id": agent_id,
+        "selected": sorted(want),
+        "changed": changed,
+        "errors": errors,
+    }
 
 
 # ── Agent 绑定（自定义技能）────────────────────────────────

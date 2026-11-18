@@ -85,14 +85,21 @@ async def update_user(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "用户不存在")
 
     if body.disabled is not None:
+        if body.disabled and user.id == current.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "不能禁用自己的账号")
         user.disabled = body.disabled
     if body.display_name is not None:
         user.display_name = body.display_name
     if body.role is not None:
         if body.role not in (UserRole.USER, UserRole.ADMIN):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "role 只能是 user 或 admin")
-        # 不能把自己降级出最后一个 admin
-        if user.id == current.id and body.role != UserRole.ADMIN:
+        # 不能修改自己的权限（用户拍板）：无论升降级，避免误操作导致无管理员或权限混乱。
+        if user.id == current.id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "不能修改自己的权限，请由其他管理员操作"
+            )
+        # 降级他人时，不能移除最后一名管理员
+        if body.role != UserRole.ADMIN and user.role == UserRole.ADMIN:
             admin_count = (
                 await session.execute(
                     select(func.count()).select_from(User).where(User.role == UserRole.ADMIN)

@@ -122,6 +122,32 @@ async def login(
     return TokenOut(access_token=token, user=UserOut.model_validate(user))
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """修改当前登录用户的密码：必须校验原密码，成功返回（旧 token 继续有效至过期）。"""
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="原密码不正确"
+        )
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="新密码不能与原密码相同",
+        )
+    user.password_hash = hash_password(body.new_password)
+    await session.commit()
+    return {"ok": True}
+
+
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)

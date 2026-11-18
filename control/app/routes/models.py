@@ -163,6 +163,65 @@ async def delete_template(
     await session.commit()
 
 
+@router.post("/api/models/{template_id}/test")
+async def test_template(
+    template_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """测试模型模板：向 OpenAI 兼容端点发一个 /models 列表请求（无副作用）。
+
+    - 不回显 api_key
+    - 短超时（8s）
+    - 若未配置 base_url，则只校验配置完整性（provider/model 非空）
+    """
+    t = (
+        await session.execute(select(ModelTemplate).where(ModelTemplate.id == template_id))
+    ).scalar_one_or_none()
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "模板不存在")
+    if t.owner_id != user.id and not t.is_shared:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权测试他人的模板")
+
+    if not t.model or not t.provider:
+        return {"ok": False, "detail": "model/provider 未配置"}
+
+    if not t.base_url:
+        return {
+            "ok": True,
+            "detail": f"配置完整（provider={t.provider}, model={t.model}）；未配置 Base URL，跳过网络探测",
+        }
+
+    # 规范化：确保 /v1 结尾的 base_url 只加一次 /models
+    import httpx
+
+    url = t.base_url.rstrip("/")
+    if not url.endswith("/models"):
+        url = f"{url}/models"
+    headers = {"Authorization": f"Bearer {t.api_key}"} if t.api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url, headers=headers)
+        if r.status_code == 200:
+            try:
+                names = [m.get("id") for m in (r.json().get("data") or [])][:10]
+            except Exception:  # noqa: BLE001
+                names = []
+            return {
+                "ok": True,
+                "detail": "连接成功",
+                "status": 200,
+                "models": names,
+            }
+        return {
+            "ok": False,
+            "detail": f"端点返回 HTTP {r.status_code}",
+            "status": r.status_code,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"连接失败: {exc}"}
+
+
 @router.post("/api/agents/{agent_id}/apply-model/{template_id}")
 async def apply_template(
     agent_id: int,
