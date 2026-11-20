@@ -414,6 +414,10 @@ async def set_agent_mcp(
     ).scalars().all()
     for b in old:
         await session.delete(b)
+    # 必须先 flush 删除，再插入新绑定：否则 SQLAlchemy 可能把同主键的
+    # DELETE/INSERT 排成 INSERT 先执行，触发 ix_agent_mcp_pair 唯一约束冲突（重复保存 500）。
+    if old:
+        await session.flush()
     for s in servers:
         session.add(AgentMCPServer(agent_id=agent_id, mcp_server_id=s.id))
     await session.flush()

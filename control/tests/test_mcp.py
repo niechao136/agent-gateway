@@ -199,5 +199,19 @@ async def test_delete_with_binding_requires_force(client):
     assert r.status_code == 204
 
 
+async def test_rebind_same_server_is_idempotent(client):
+    """重复保存同一绑定（先删后插同主键）不应 500（回归：唯一约束冲突）。"""
+    tok = await _user_token(client, "rebind")
+    sid = (await client.post("/api/mcp", headers=_h(tok), json=STDIO_BODY)).json()["id"]
+    aid = await _agent(client, tok, slug="rebinda1")
+
+    for _ in range(3):
+        r = await client.put(
+            f"/api/agents/{aid}/mcp", headers=_h(tok), json={"mcp_server_ids": [sid]}
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["bound"] == 1
+
+
 async def test_mcp_requires_login(client):
     assert (await client.get("/api/mcp")).status_code == 401

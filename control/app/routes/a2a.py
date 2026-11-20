@@ -333,6 +333,9 @@ async def set_agent_endpoints(
     ).scalars().all()
     for b in old:
         await session.delete(b)
+    # 先 flush 删除，避免同主键的 DELETE/INSERT 顺序不确定导致唯一约束冲突（重复保存 500）。
+    if old:
+        await session.flush()
     for e in endpoints:
         session.add(AgentA2AEndpoint(agent_id=agent_id, endpoint_id=e.id))
     await session.flush()

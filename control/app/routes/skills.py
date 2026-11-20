@@ -513,6 +513,9 @@ async def set_agent_skills(
     ).scalars().all()
     for b in old:
         await session.delete(b)
+    # 先 flush 删除，避免同主键的 DELETE/INSERT 顺序不确定触发唯一约束（重复保存 500）。
+    if old:
+        await session.flush()
     for s in skills:
         session.add(AgentCustomSkill(agent_id=agent_id, skill_id=s.id))
     await session.flush()
