@@ -133,10 +133,18 @@ async def _agent_card_response(slug: str, request: Request, session: AsyncSessio
     agent = (await session.execute(select(Agent).where(Agent.slug == slug))).scalar_one_or_none()
     if agent is None or agent.status != AgentStatus.PUBLISHED:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在或未发布")
-    # 反代场景：request.base_url 可能是内部容器名，优先用对外 Host + X-Forwarded-Proto
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    return _card(agent, f"{proto}://{host}")
+    # 反代场景：nginx 传的 Host 可能是 upstream 名（control_backend），
+    # 优先用显式配置的 PUBLIC_BASE_URL（如 http://43.156.187.79:10100）。
+    import os
+
+    public = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    if public:
+        base = public
+    else:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        base = f"{proto}://{host}"
+    return _card(agent, base)
 
 
 @router.get("/a2a/{slug}/.well-known/agent-card.json")
