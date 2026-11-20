@@ -40,6 +40,10 @@ import {
   listMCPServers,
   listModelTemplates,
   listSkills,
+  listKnowledgeBases,
+  type KnowledgeBase,
+  getAgentKnowledge,
+  setAgentKnowledge,
   setAgentA2A,
   setAgentBuiltinSkills,
   setAgentMCP,
@@ -97,6 +101,10 @@ function EditInner() {
   const [newA2aOpen, setNewA2aOpen] = useState(false);
   const [newA2a, setNewA2a] = useState({ name: "", url: "", token: "" });
 
+  // 知识库绑定
+  const [knowledgeAll, setKnowledgeAll] = useState<KnowledgeBase[]>([]);
+  const [knowledgeBound, setKnowledgeBound] = useState<number[]>([]);
+
   // API Key
   const [keys, setKeys] = useState<AgentAPIKey[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
@@ -109,7 +117,7 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs] = await Promise.all([
+      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind] = await Promise.all([
         listModelTemplates().catch(() => []),
         listMCPServers().catch(() => []),
         getAgentMCP(id).catch(() => ({ bound: [] as MCPServer[] })),
@@ -119,6 +127,8 @@ function EditInner() {
         listA2AEndpoints().catch(() => []),
         getAgentA2A(id).catch(() => ({ bound: [] as A2AEndpoint[] })),
         listAgentBuiltinSkills(id).catch(() => ({ skills: [] as AgentBuiltinSkill[] })),
+        listKnowledgeBases().catch(() => []),
+        getAgentKnowledge(id).catch(() => ({ bound: [] as number[] })),
       ]);
       setTemplates(tpl);
       setMcpAll(mcp);
@@ -130,6 +140,8 @@ function EditInner() {
       setA2aBound((a2aBind.bound ?? []).map((e) => e.id));
       setBuiltinSkills(bs.skills ?? []);
       setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
+      setKnowledgeAll(kbAll);
+      setKnowledgeBound(kbBind.bound ?? []);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
     }
@@ -234,6 +246,19 @@ function EditInner() {
     }
   }
 
+  async function saveKnowledge(ids: number[]) {
+    setBusy(true);
+    try {
+      const r = await setAgentKnowledge(id, ids);
+      setKnowledgeBound(ids);
+      setOk(`知识库绑定已同步（检索 Skill 已生成）`);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "知识库绑定失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createAndBindA2a() {
     setBusy(true);
     try {
@@ -297,6 +322,7 @@ function EditInner() {
         <Tab label="MCP" />
         <Tab label="Skill" />
         <Tab label="A2A" />
+        <Tab label="知识库" />
         <Tab label="API 密钥" />
       </Tabs>
 
@@ -563,6 +589,72 @@ function EditInner() {
       )}
 
       {tab === 6 && (
+        <Card><CardContent><Stack spacing={2}>
+          <Typography variant="subtitle1">绑定的知识库（RAGFlow）</Typography>
+          {knowledgeAll.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              还没有知识库。请先到「知识库」页登记 RAGFlow 知识库。
+            </Typography>
+          ) : knowledgeAll.map((kb) => (
+            <FormControlLabel key={kb.id}
+              control={<Checkbox checked={knowledgeBound.includes(kb.id)} onChange={(e) => {
+                const next = e.target.checked
+                  ? [...knowledgeBound, kb.id]
+                  : knowledgeBound.filter((x) => x !== kb.id);
+                void saveKnowledge(next);
+              }} />}
+              label={<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <ListItemText primary={kb.name} secondary={kb.dataset_name ?? kb.description ?? ""} />
+                {kb.is_shared ? <Chip size="small" label="共享" /> : null}
+              </Stack>} />))
+          }
+          <Typography variant="caption" color="text.secondary">
+            绑定后控制层会向该 Agent 的 profile 注入「knowledge_search」检索 Skill，Agent 即可基于知识库作答。
+          </Typography>
+        </Stack></CardContent></Card>
+      )}
+
+      {tab === 6 && (
+        <Card>
+          <CardContent>
+            <Stack spacing={2}>
+              <Typography variant="subtitle1">知识库（RAGFlow）</Typography>
+              <Typography variant="body2" color="text.secondary">
+                勾选后会自动为该 Agent 生成知识库检索 Skill 并注入 profile。
+                默认全不选；Agent 需要开启 terminal 工具集才能运行检索脚本（编辑页「工具」Tab）。
+              </Typography>
+              {knowledgeAll.length === 0 ? (
+                <Typography color="text.secondary">
+                  还没有知识库。请到「知识库」页登记 RAGFlow 连接后再回来绑定。
+                </Typography>
+              ) : knowledgeAll.map((k) => (
+                <FormControlLabel
+                  key={k.id}
+                  control={
+                    <Checkbox
+                      checked={knowledgeBound.includes(k.id)}
+                      onChange={(e) => void saveKnowledge(
+                        e.target.checked
+                          ? [...knowledgeBound, k.id]
+                          : knowledgeBound.filter((x) => x !== k.id)
+                      )}
+                    />
+                  }
+                  label={
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                      <ListItemText primary={k.name}
+                        secondary={`${k.dataset_name ?? "未选数据集"} · ${k.base_url}`} />
+                      {k.is_shared ? <Chip size="small" label="共享" /> : null}
+                    </Stack>
+                  }
+                />
+              ))}
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 7 && (
         <Card>
           <CardContent>
             <Stack spacing={2}>

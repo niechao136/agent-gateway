@@ -788,3 +788,79 @@ export async function getMessages(
   );
   return r.messages;
 }
+
+// ── 知识库（RAGFlow）──────────────────────────────────────
+export interface KnowledgeBase {
+  id: number;
+  name: string;
+  owner_id: number;
+  description: string | null;
+  source: string;
+  base_url: string;
+  has_api_key: boolean;
+  dataset_id: string | null;
+  dataset_name: string | null;
+  is_shared: boolean;
+  enabled: boolean;
+}
+
+export interface DatasetItem {
+  id: string;
+  name: string;
+}
+
+export function listKnowledgeBases(): Promise<KnowledgeBase[]> {
+  return request("/knowledge");
+}
+
+export function createKnowledgeBase(body: {
+  name: string;
+  description?: string;
+  base_url: string;
+  api_key: string;
+  dataset_id?: string;
+  dataset_name?: string;
+  is_shared?: boolean;
+  enabled?: boolean;
+}): Promise<KnowledgeBase> {
+  return request("/knowledge", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function updateKnowledgeBase(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<KnowledgeBase> {
+  return request(`/knowledge/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export function deleteKnowledgeBase(id: number, force = false): Promise<void> {
+  return request(`/knowledge/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+
+export function listRagflowDatasets(body: {
+  base_url: string;
+  api_key: string;
+}): Promise<{ datasets: DatasetItem[] }> {
+  return request("/knowledge/datasets", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function testKnowledgeBase(id: number): Promise<{ ok: boolean; message: string }> {
+  return request(`/knowledge/${id}/test`, { method: "POST" });
+}
+
+export function getAgentKnowledge(agentId: number): Promise<{
+  bound: number[];
+  effective: string[];
+}> {
+  return request(`/agents/${agentId}/knowledge`);
+}
+
+export function setAgentKnowledge(
+  agentId: number,
+  kb_ids: number[],
+): Promise<{ bound: number; sync: unknown }> {
+  return request(`/agents/${agentId}/knowledge`, {
+    method: "PUT",
+    body: JSON.stringify({ kb_ids }),
+  });
+}

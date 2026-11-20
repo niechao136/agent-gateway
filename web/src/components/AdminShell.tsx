@@ -21,6 +21,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
 import ExtensionIcon from "@mui/icons-material/Extension";
+import StorageIcon from "@mui/icons-material/Storage";
 import AutoStoriesIcon from "@mui/icons-material/AutoStories";
 import MemoryIcon from "@mui/icons-material/Memory";
 import CableIcon from "@mui/icons-material/Cable";
@@ -50,6 +51,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin", label: "Agent", icon: <SmartToyIcon /> },
   { href: "/admin/mcp", label: "MCP 服务器", icon: <ExtensionIcon /> },
+  { href: "/admin/knowledge", label: "知识库", icon: <StorageIcon /> },
   { href: "/admin/skills", label: "自定义 Skill", icon: <AutoStoriesIcon /> },
   { href: "/admin/skills/builtin", label: "内置 Skill", icon: <MemoryIcon /> },
   { href: "/admin/models", label: "模型", icon: <MemoryIcon /> },
