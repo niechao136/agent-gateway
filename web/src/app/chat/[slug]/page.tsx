@@ -71,6 +71,7 @@ function ChatView() {
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const toolSeqRef = useRef<number>(0);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -159,16 +160,31 @@ function ChatView() {
               ),
             );
           } else if (ev.type === "tool_start") {
+            // 每个 tool 事件分配唯一序号，避免同名工具多次调用时回填错位
+            toolSeqRef.current += 1;
+            const seq = toolSeqRef.current;
             setMessages((m) => [
               ...m,
-              { id: `t-${Date.now()}`, role: "tool", toolName: ev.name, content: "" },
+              {
+                id: `t-${seq}`,
+                role: "tool",
+                toolName: ev.name,
+                toolSeq: seq,
+                toolStatus: "running",
+                content: "",
+              },
             ]);
           } else if (ev.type === "tool_end") {
             setMessages((m) => {
-              for (let i = m.length - 1; i >= 0; i -= 1) {
-                if (m[i].role === "tool" && m[i].toolName === ev.name && !m[i].content) {
+              // 按 name + running 状态匹配最早的一条（FIFO），精确回填
+              for (let i = 0; i < m.length; i += 1) {
+                if (
+                  m[i].role === "tool" &&
+                  m[i].toolName === ev.name &&
+                  m[i].toolStatus === "running"
+                ) {
                   const copy = [...m];
-                  copy[i] = { ...copy[i], content: ev.output };
+                  copy[i] = { ...copy[i], content: ev.output, toolStatus: "done" };
                   return copy;
                 }
               }

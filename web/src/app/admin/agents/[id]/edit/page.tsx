@@ -420,83 +420,101 @@ function EditInner() {
       )}
 
       {tab === 4 && (
-        <Card>
-          <CardContent>
-            <Stack spacing={1.5}>
-              {/* 内置 Skill：独立 state（字符串名），默认全不选 */}
-              <Divider textAlign="left">
-                <Typography variant="body2" color="text.secondary">
-                  内置 Skill（默认全不选）
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+            gap: 2,
+            alignItems: "start",
+          }}
+        >
+          {/* 内置 Skill：独立 state（字符串名），默认全不选 */}
+          <Card>
+            <CardContent>
+              <Stack spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                    内置 Skill
+                  </Typography>
+                  <Chip size="small" label={`已选 ${builtinSelected.length}/${builtinSkills.length}`} />
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  hermes 自带技能，默认全不选；勾选后对该 Agent 启用。
                 </Typography>
-              </Divider>
-              {builtinSkills.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  hermes 未提供内置 Skill 列表（dashboard 不可用）。
-                </Typography>
-              ) : (
-                builtinSkills.map((bs) => (
-                  <FormControlLabel
-                    key={bs.name}
-                    control={
-                      <Checkbox
-                        checked={builtinSelected.includes(bs.name)}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? [...builtinSelected, bs.name]
-                            : builtinSelected.filter((n) => n !== bs.name);
-                          void saveBuiltin(next);
-                        }}
-                      />
-                    }
-                    label={
-                      <ListItemText primary={bs.name} secondary={bs.description ?? ""} />
-                    }
-                  />
-                ))
-              )}
+                {builtinSkills.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    hermes 未提供内置 Skill 列表（dashboard 不可用）。
+                  </Typography>
+                ) : (
+                  builtinSkills.map((bs) => (
+                    <FormControlLabel
+                      key={bs.name}
+                      control={
+                        <Checkbox
+                          checked={builtinSelected.includes(bs.name)}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...builtinSelected, bs.name]
+                              : builtinSelected.filter((n) => n !== bs.name);
+                            void saveBuiltin(next);
+                          }}
+                        />
+                      }
+                      label={
+                        <ListItemText primary={bs.name} secondary={bs.description ?? ""} />
+                      }
+                    />
+                  ))
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
 
-              {/* 自定义 Skill：独立 state（数字 ID） */}
-              <Divider textAlign="left">
-                <Typography variant="body2" color="text.secondary">
-                  自定义 Skill
+          {/* 自定义 Skill：独立 state（数字 ID） */}
+          <Card>
+            <CardContent>
+              <Stack spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                    自定义 Skill
+                  </Typography>
+                  <Chip size="small" label={`已绑 ${skillBound.length}/${skillsAll.length}`} />
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  平台内创建，写入该 Agent 的 profile（含 references/scripts/templates/assets）。
                 </Typography>
-              </Divider>
-              <Typography variant="subtitle1">已绑定的自定义 Skill</Typography>
-              {skillsAll.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  还没有自定义 Skill。请到「自定义 Skill」页创建后再回来绑定。
-                </Typography>
-              ) : (
-                skillsAll.map((sk) => (
-                  <FormControlLabel
-                    key={sk.id}
-                    control={
-                      <Checkbox
-                        checked={skillBound.includes(sk.id)}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? [...skillBound, sk.id]
-                            : skillBound.filter((x) => x !== sk.id);
-                          void saveSkills(next);
-                        }}
-                      />
-                    }
-                    label={
-                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                        <ListItemText primary={sk.name} secondary={sk.description ?? ""} />
-                        {sk.is_shared ? <Chip size="small" label="共享" /> : null}
-                      </Stack>
-                    }
-                  />
-                ))
-              )}
-              <Typography variant="caption" color="text.secondary">
-                两类 Skill 独立管理：内置 Skill 按名称选择，自定义 Skill 按 ID 绑定；
-                自定义 Skill 写入该 Agent 的 profile（含 references/scripts/templates/assets）。
-              </Typography>
-            </Stack>
-          </CardContent>
-        </Card>
+                {skillsAll.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    还没有自定义 Skill。请到「自定义 Skill」页创建后再回来绑定。
+                  </Typography>
+                ) : (
+                  skillsAll.map((sk) => (
+                    <FormControlLabel
+                      key={sk.id}
+                      control={
+                        <Checkbox
+                          checked={skillBound.includes(sk.id)}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...skillBound, sk.id]
+                              : skillBound.filter((x) => x !== sk.id);
+                            void saveSkills(next);
+                          }}
+                        />
+                      }
+                      label={
+                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                          <ListItemText primary={sk.name} secondary={sk.description ?? ""} />
+                          {sk.is_shared ? <Chip size="small" label="共享" /> : null}
+                        </Stack>
+                      }
+                    />
+                  ))
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Box>
       )}
 
       {tab === 5 && (

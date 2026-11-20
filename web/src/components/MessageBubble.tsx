@@ -1,12 +1,94 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@/lib/chatTypes";
+
+/** 尝试把工具输出格式化为可读文本；JSON 会缩进，便于阅读。 */
+function formatToolOutput(raw: string): { text: string; isJson: boolean } {
+  if (!raw) return { text: "", isJson: false };
+  try {
+    const parsed = JSON.parse(raw);
+    return { text: JSON.stringify(parsed, null, 2), isJson: true };
+  } catch {
+    // hermes 的 tool 输出可能是 Python repr（单引号），尝试温和转换
+    return { text: raw, isJson: false };
+  }
+}
+
+function ToolCallBlock({ message }: { message: ChatMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const running = message.toolStatus === "running";
+  const { text, isJson } = formatToolOutput(message.content);
+  const preview = text.length > 160 ? `${text.slice(0, 160)}…` : text;
+
+  return (
+    <Box
+      sx={{
+        display: "inline-block",
+        maxWidth: "100%",
+        bgcolor: "action.hover",
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 2,
+        px: 1.25,
+        py: 0.75,
+        mb: 1,
+      }}
+    >
+      <StackRow>
+        {running ? <CircularProgress size={14} /> : null}
+        <Chip
+          size="small"
+          label={`${running ? "调用中" : "工具"} · ${message.toolName ?? "tool"}`}
+          color={running ? "primary" : "default"}
+          variant="outlined"
+          onClick={text ? () => setExpanded((v) => !v) : undefined}
+          sx={{ cursor: text ? "pointer" : "default" }}
+        />
+      </StackRow>
+      {text && expanded ? (
+        <Box
+          component="pre"
+          sx={{
+            m: 0,
+            mt: 0.75,
+            p: 1,
+            maxHeight: 260,
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            bgcolor: "background.paper",
+            borderRadius: 1,
+            fontFamily: isJson ? "ui-monospace, monospace" : "inherit",
+            fontSize: 12,
+          }}
+        >
+          {text}
+        </Box>
+      ) : text ? (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          {preview}
+        </Typography>
+      ) : running ? (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          正在执行…
+        </Typography>
+      ) : null}
+    </Box>
+  );
+}
+
+/** 轻量行容器（避免引入 Stack 的 MUI9 prop 坑） */
+function StackRow({ children }: { children: ReactNode }) {
+  return <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>{children}</Box>;
+}
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
@@ -64,28 +146,11 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           "& th, & td": { border: 1, borderColor: "divider", px: 1, py: 0.5 },
         }}
       >
-        {message.toolName ? (
-          <Chip
-            size="small"
-            label={`工具：${message.toolName}`}
-            color={message.role === "tool" ? "default" : "primary"}
-            variant="outlined"
-            sx={{ mb: 1 }}
-          />
-        ) : null}
-
-        {isError ? (
+        {message.role === "tool" ? (
+          <ToolCallBlock message={message} />
+        ) : isError ? (
           <Typography variant="body2" color="error.main">
             {message.content}
-          </Typography>
-        ) : message.role === "tool" ? (
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            component="pre"
-            sx={{ whiteSpace: "pre-wrap", fontFamily: "inherit", m: 0 }}
-          >
-            {message.content || "（无输出）"}
           </Typography>
         ) : (
           <Box sx={{ typography: "body1" }}>

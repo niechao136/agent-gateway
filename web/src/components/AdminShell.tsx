@@ -90,10 +90,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <Divider />
       <List sx={{ flexGrow: 1, pt: 1 }}>
         {items.map((item) => {
-          const active =
-            item.href === "/admin"
-              ? pathname === "/admin" || pathname.startsWith("/admin/agents")
-              : pathname.startsWith(item.href);
+          // 最长前缀匹配：避免 /admin/sk 与 /admin/skills/builtin 同时高亮。
+          // /admin 同时作为 /admin/agents 编辑页的别名。
+          const matches = items.filter((i) => {
+            const h = i.href;
+            if (h === "/admin") {
+              return pathname === "/admin" || pathname.startsWith("/admin/agents");
+            }
+            return pathname === h || pathname.startsWith(`${h}/`);
+          });
+          const activeHref = matches.sort((a, b) => b.href.length - a.href.length)[0]?.href;
+          const active = activeHref === item.href;
           return (
             <ListItemButton
               key={item.href}
