@@ -5,6 +5,10 @@ services:
       - ${HERMES_DATA_DIR}:/opt/data
     mem_limit: 1200m
   control:
+    # control 需要写共享的 hermes-data（profile config.yaml / skills / mcp / a2a）。
+    # 该目录属主是 devops(1002:1003)，与 hermes 容器内 hermes 用户同 uid/gid。
+    # 让 control 以同 uid/gid 运行，避免原子写临时文件时 PermissionError。
+    user: "1002:1003"
     mem_limit: 384m
   web:
     mem_limit: 256m
