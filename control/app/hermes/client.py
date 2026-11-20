@@ -151,7 +151,11 @@ class DashboardClient:
         return await self._request("DELETE", f"/api/profiles/{name}")
 
     async def set_soul(self, name: str, soul: str) -> Any:
-        return await self._request("PUT", f"/api/profiles/{name}/soul", json={"soul": soul})
+        # 实测（2026-11）：dashboard PUT /api/profiles/{name}/soul 的 body 字段
+        # 是 `content`；传 `soul` 会得到 422 Field required: content（前端保存 500）。
+        return await self._request(
+            "PUT", f"/api/profiles/{name}/soul", json={"content": soul}
+        )
 
     async def set_model(self, name: str, model: str, provider: str | None = None) -> Any:
         body: dict[str, Any] = {"model": model}
