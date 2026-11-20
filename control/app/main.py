@@ -19,6 +19,7 @@ from .models import User, UserRole
 from .routes import (
     a2a as a2a_routes,
     a2a_inbound,
+    a2a_server as a2a_server_routes,
     agents,
     api_keys,
     auth,
@@ -123,6 +124,7 @@ app.include_router(v1_routes.router)       # /api/v1（对外，agk 鉴权）
 app.include_router(connector_routes.router)  # /api/connectors
 app.include_router(model_routes.router)    # /api/models
 app.include_router(a2a_inbound.router)     # /api/a2a/inbound
+app.include_router(a2a_server_routes.router)  # /a2a/{slug} A2A 服务端（对外）
 app.include_router(users.router)           # /api/admin/users
 app.include_router(chat.router)
 
