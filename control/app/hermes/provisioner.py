@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 from ..config import get_settings
 from ..models import Agent
@@ -21,6 +22,37 @@ from .toolsets import normalize_disabled
 logger = logging.getLogger(__name__)
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def ensure_profile_api_key(profile: str) -> None:
+    """为 profile 写入专属 API_SERVER_KEY（multiplex 路由鉴权用）。
+
+    hermes 以 GATEWAY_MULTIPLEX_PROFILES=true 运行，
+    `/p/<profile>/api/...` 必须用该 profile `.env` 里的 API_SERVER_KEY。
+    这里写入与 gateway.profile_api_key() 相同的确定性值，保证控制层与
+    profile 端一致；目录未就绪时降级为警告（下次同步补写）。
+    """
+    from .gateway import profile_api_key
+
+    settings = get_settings()
+    env_path = Path(settings.hermes_data_root) / "profiles" / profile / ".env"
+    try:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        key_line = f"API_SERVER_KEY={profile_api_key(profile)}\n"
+        existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+        if "API_SERVER_KEY=" in existing:
+            import re as _re
+            existing = _re.sub(
+                r"^API_SERVER_KEY=.*$", key_line.rstrip(), existing, flags=_re.M
+            )
+            if not existing.endswith("\n"):
+                existing += "\n"
+            env_path.write_text(existing, encoding="utf-8")
+        else:
+            with env_path.open("a", encoding="utf-8") as fh:
+                fh.write(key_line)
+    except OSError as exc:
+        logger.warning("写入 profile %s 的 API_SERVER_KEY 失败: %s", profile, exc)
 
 
 class ProvisionError(RuntimeError):
@@ -72,6 +104,9 @@ async def create_agent_profile(
             )
         except DashboardError as exc:
             raise ProvisionError(f"创建 profile 失败: {exc}") from exc
+
+    # 写入 profile 专属 API_SERVER_KEY（multiplex 路由鉴权必需）。
+    ensure_profile_api_key(pname)
 
     # profile 建好后写 disabled_toolsets 到 config.yaml（api_server 预设
     # 默认保留 terminal，必须显式禁 —— SPEC §4.4）。

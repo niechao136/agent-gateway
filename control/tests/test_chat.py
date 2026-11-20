@@ -273,7 +273,7 @@ async def test_soft_delete_hides_but_keeps_hermes_session(client, atok):
     ).status_code == 204
     assert (await client.get("/api/chat/conversations", headers=_h(tok))).json() == []
     assert sid in _gw().store
-    assert not any(c == ("delete", sid) for c in _gw().calls)
+    assert not any(c[0] == "delete" and c[1] == sid for c in _gw().calls)
 
 
 async def test_restore_conversation(client, atok):
@@ -317,6 +317,11 @@ async def test_stream_endpoint_returns_sse(client, atok):
     assert "text/event-stream" in r.headers["content-type"]
     assert "event: token" in r.text
     assert "event: done" in r.text
+    # 回归：对话必须带该 Agent 的 profile，否则 hermes 落到 main profile 报模型未连接
+    chats = [c for c in _gw().calls if c[0] == "chat"]
+    agents = {a["slug"]: a for a in (await client.get("/api/agents", headers=_h(atok))).json()}
+    expected = agents["bot1"]["profile_name"]
+    assert chats and chats[-1][2] == expected, (chats, expected)
 
 
 # ── 工具函数 ──────────────────────────────────────────────

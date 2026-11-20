@@ -41,17 +41,9 @@ def resolve_api_key() -> str:
     """
     dotenv = _settings.hermes_dotenv_path
     if dotenv:
-        p = Path(dotenv)
-        try:
-            if p.is_file():
-                for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-                    m = re.match(r"\s*API_SERVER_KEY\s*=\s*(.*)", line)
-                    if m:
-                        key = m.group(1).strip().strip('"').strip("'")
-                        if key:
-                            return key
-        except OSError as exc:
-            logger.warning("读取 %s 失败: %s", dotenv, exc)
+        key = _read_dotenv_key(Path(dotenv))
+        if key:
+            return key
 
     if _settings.hermes_api_key:
         return _settings.hermes_api_key
@@ -59,6 +51,34 @@ def resolve_api_key() -> str:
         "无法解析 hermes API key：%s 不可读且 HERMES_API_KEY 为空", dotenv
     )
     return ""
+
+
+def _read_dotenv_key(path: Path) -> str:
+    """从指定 .env 文件读 API_SERVER_KEY。"""
+    try:
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                m = re.match(r"\s*API_SERVER_KEY\s*=\s*(.*)", line)
+                if m:
+                    key = m.group(1).strip().strip('"').strip("'")
+                    if key:
+                        return key
+    except OSError as exc:
+        logger.warning("读取 %s 失败: %s", path, exc)
+    return ""
+
+
+def profile_api_key(profile: str) -> str:
+    """profile 专属 API_SERVER_KEY（hermes multiplex 路由必需）。
+
+    hermes 以 GATEWAY_MULTIPLEX_PROFILES=true 运行时，`/p/<profile>/...`
+    必须用该 profile 自己 .env 里的 API_SERVER_KEY，全局 key 会被拒（401）。
+    这里确定性派生 sha256(全局key + profile)，与 provisioner 写入 profile
+    .env 的值严格一致，控制层无需在 DB 另存 key。
+    """
+    import hashlib
+
+    return hashlib.sha256((resolve_api_key() + profile).encode()).hexdigest()
 
 
 class GatewayError(RuntimeError):
@@ -100,6 +120,27 @@ class GatewayClient:
             raise RuntimeError("GatewayClient 必须在 async with 内使用")
         return self._client
 
+    def _headers(self, profile: str | None) -> dict[str, str] | None:
+        """profile 专属 API 用该 profile 的 API_SERVER_KEY 鉴权；
+        默认 profile 用 client 的全局 key（返回 None 走 client 默认 header）。"""
+        if not profile:
+            return None
+        return {"Authorization": f"Bearer {profile_api_key(profile)}"}
+
+    def _p(self, profile: str | None, path: str) -> str:
+        """profile 专属路由前缀（与 _profile_path 等价，内部统一用这个）。"""
+        return self._profile_path(profile, path)
+
+    def _headers(self, profile: str | None) -> dict[str, str]:
+        """profile 专属鉴权头：multiplex 路由必须用该 profile 自己的 key。"""
+        if not profile:
+            return {"Authorization": f"Bearer {self._key}"}
+        return {"Authorization": f"Bearer {profile_api_key(profile)}"}
+
+    def _p(self, profile: str | None, path: str) -> str:
+        """profile 路由前缀 + 路径。"""
+        return self._profile_path(profile, path)
+
     async def _json(self, r: httpx.Response) -> Any:
         if r.status_code >= 400:
             raise GatewayError(
@@ -117,32 +158,41 @@ class GatewayClient:
         body: dict[str, Any] = {"id": session_id}
         if title:
             body["title"] = title
-        path = self._profile_path(profile, "/api/sessions")
-        r = await self._c().post(path, json=body)
+        path = self._p(profile, "/api/sessions")
+        r = await self._c().post(path, json=body, headers=self._headers(profile))
         return await self._json(r)
 
-    async def list_sessions(self, *, limit: int = 50, offset: int = 0) -> list[dict]:
-        r = await self._c().get("/api/sessions", params={"limit": limit, "offset": offset})
+    async def list_sessions(
+        self, *, limit: int = 50, offset: int = 0, profile: str | None = None
+    ) -> list[dict]:
+        path = self._p(profile, "/api/sessions")
+        r = await self._c().get(
+            path, params={"limit": limit, "offset": offset}, headers=self._headers(profile)
+        )
         data = await self._json(r) or {}
         # 实测字段是 data，兼容性兜底 sessions
         return data.get("data") or data.get("sessions") or []
 
-    async def get_session(self, session_id: str) -> dict | None:
+    async def get_session(self, session_id: str, *, profile: str | None = None) -> dict | None:
         """通过列表过滤出单个会话（无 GET /api/sessions/{id} 单查端点）。"""
-        for s in await self.list_sessions(limit=200):
+        for s in await self.list_sessions(limit=200, profile=profile):
             if s.get("id") == session_id:
                 return s
         return None
 
-    async def delete_session(self, session_id: str) -> None:
-        r = await self._c().delete(f"/api/sessions/{session_id}")
+    async def delete_session(self, session_id: str, *, profile: str | None = None) -> None:
+        path = self._p(profile, f"/api/sessions/{session_id}")
+        r = await self._c().delete(path, headers=self._headers(profile))
         await self._json(r)
 
-    async def session_messages(self, session_id: str, *, limit: int | None = None) -> list[dict]:
+    async def session_messages(
+        self, session_id: str, *, limit: int | None = None, profile: str | None = None
+    ) -> list[dict]:
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
-        r = await self._c().get(f"/api/sessions/{session_id}/messages", params=params)
+        path = self._p(profile, f"/api/sessions/{session_id}/messages")
+        r = await self._c().get(path, params=params, headers=self._headers(profile))
         data = await self._json(r) or {}
         if isinstance(data, list):
             return data
@@ -150,7 +200,7 @@ class GatewayClient:
 
     # ── 流式对话 ──────────────────────────────────────────
     async def chat_stream(
-        self, session_id: str, message: str
+        self, session_id: str, message: str, *, profile: str | None = None
     ) -> AsyncIterator[bytes]:
         """SSE 原始字节流。解析交给上层（chat_proxy）。
 
@@ -161,8 +211,9 @@ class GatewayClient:
         `_session_chat_user_message` 只认 `message` 或 `input`，不是 OpenAI 的 messages 数组。
         """
         payload = {"message": message}
+        path = self._p(profile, f"/api/sessions/{session_id}/chat/stream")
         async with self._c().stream(
-            "POST", f"/api/sessions/{session_id}/chat/stream", json=payload
+            "POST", path, json=payload, headers=self._headers(profile)
         ) as r:
             if r.status_code >= 400:
                 body = await r.aread()
@@ -184,5 +235,5 @@ class GatewayClient:
     async def toolsets(self, profile: str | None = None) -> dict:
         """读取实际生效的 toolset（安全验证用）。"""
         path = self._profile_path(profile, "/v1/toolsets")
-        r = await self._c().get(path)
+        r = await self._c().get(path, headers=self._headers(profile))
         return await self._json(r) or {}

@@ -156,9 +156,10 @@ async def get_messages(
     except conv_svc.ConversationNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
+    profile = await conv_svc.profile_of_conversation(session, conv)
     async with gw_mod.GatewayClient() as gw:
         try:
-            raw = await gw.session_messages(conv.hermes_session_id, limit=limit)
+            raw = await gw.session_messages(conv.hermes_session_id, limit=limit, profile=profile)
         except gw_mod.GatewayError as exc:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"读取历史失败: {exc}") from exc
 
@@ -275,13 +276,14 @@ async def chat_stream(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
     sid = conv.hermes_session_id
+    profile = await conv_svc.profile_of_conversation(session, conv)
 
     async def gen() -> AsyncIterator[bytes]:
         gw = gw_mod.GatewayClient()
         try:
             async with gw:
                 async for frame in chat_proxy.translate_stream(
-                    gw.chat_stream(sid, body.message), thread_id=sid
+                    gw.chat_stream(sid, body.message, profile=profile), thread_id=sid
                 ):
                     yield frame
         finally:

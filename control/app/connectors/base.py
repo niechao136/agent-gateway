@@ -171,7 +171,7 @@ class ConnectorRunner(ABC):
                 gw = gw_mod.GatewayClient()
                 async with gw:
                     async for frame in chat_proxy.translate_stream(
-                        gw.chat_stream(sid, text), thread_id=sid
+                        gw.chat_stream(sid, text, profile=agent.profile_name), thread_id=sid
                     ):
                         t, _ = chat_proxy.extract_text_and_usage(frame)
                         if t:

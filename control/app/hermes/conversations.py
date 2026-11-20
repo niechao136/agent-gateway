@@ -94,6 +94,16 @@ async def get_owned_by_hermes_id(
     return conv
 
 
+async def profile_of_conversation(session: AsyncSession, conv: Conversation) -> str:
+    """取会话所属 Agent 的 hermes profile 名（对话必须走对应 profile）。"""
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == conv.agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise ConversationError(f"会话 {conv.id} 的 Agent 不存在")
+    return agent.profile_name
+
+
 async def create_conversation(
     session: AsyncSession,
     *,
@@ -116,8 +126,8 @@ async def create_conversation(
 
     async with GatewayClient() as gw:
         try:
-            # 不传 title：避免全局唯一约束冲突
-            await gw.create_session(sid)
+            # 不传 title：避免全局唯一约束冲突；必须带 profile 否则落到 main profile
+            await gw.create_session(sid, profile=agent.profile_name)
         except GatewayError as exc:
             raise ConversationError(f"创建 hermes 会话失败: {exc}") from exc
 
@@ -136,7 +146,7 @@ async def create_conversation(
         # DB 失败 → 回滚 hermes 侧，避免孤儿 session
         try:
             async with GatewayClient() as gw2:
-                await gw2.delete_session(sid)
+                await gw2.delete_session(sid, profile=agent.profile_name)
         except Exception as exc:  # noqa: BLE001
             logger.warning("回滚 hermes session %s 失败: %s", sid, exc)
         raise
@@ -159,7 +169,7 @@ async def create_conversation_for_agent(
 
     async with GatewayClient() as gw:
         try:
-            await gw.create_session(sid)
+            await gw.create_session(sid, profile=agent.profile_name)
         except GatewayError as exc:
             raise ConversationError(f"创建 hermes 会话失败: {exc}") from exc
 
@@ -177,7 +187,7 @@ async def create_conversation_for_agent(
         await session.rollback()
         try:
             async with GatewayClient() as gw2:
-                await gw2.delete_session(sid)
+                await gw2.delete_session(sid, profile=agent.profile_name)
         except Exception as exc:  # noqa: BLE001
             logger.warning("回滚 hermes session %s 失败: %s", sid, exc)
         raise
@@ -239,11 +249,20 @@ async def hard_delete_expired(session: AsyncSession, *, retention_days: int | No
     if not rows:
         return 0
 
+    # 一次性取回 agent_id → profile_name 映射（按 profile 路由删 hermes session 需要）
+    agent_ids = {c.agent_id for c in rows}
+    profiles = {
+        a.id: a.profile_name
+        for a in (await session.execute(select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all()
+    }
+
     cleaned = 0
     async with GatewayClient() as gw:
         for conv in rows:
             try:
-                await gw.delete_session(conv.hermes_session_id)
+                await gw.delete_session(
+                    conv.hermes_session_id, profile=profiles.get(conv.agent_id)
+                )
             except GatewayError as exc:
                 # hermes 侧已不存在也算清理成功
                 logger.warning("删除 hermes session %s 失败: %s", conv.hermes_session_id, exc)

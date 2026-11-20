@@ -128,7 +128,7 @@ class FakeGateway:
     """内存版 GatewayClient。"""
 
     store: dict[str, dict] = {}
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple] = []  # ("create"|"delete"|"chat", session_id[, profile])
     stream_frames: list[bytes] = []
 
     def __init__(self, *a, **kw):
@@ -146,23 +146,24 @@ class FakeGateway:
         if session_id in FakeGateway.store:
             raise GatewayError("dup", status=409)
         FakeGateway.store[session_id] = {"id": session_id, "title": title}
-        FakeGateway.calls.append(("create", session_id))
+        FakeGateway.calls.append(("create", session_id, profile))
         return {"session": FakeGateway.store[session_id]}
 
-    async def list_sessions(self, *, limit=50, offset=0):
+    async def list_sessions(self, *, limit=50, offset=0, profile=None):
         return list(FakeGateway.store.values())
 
-    async def get_session(self, sid):
+    async def get_session(self, sid, *, profile=None):
         return FakeGateway.store.get(sid)
 
-    async def delete_session(self, sid):
-        FakeGateway.calls.append(("delete", sid))
+    async def delete_session(self, sid, *, profile=None):
+        FakeGateway.calls.append(("delete", sid, profile))
         FakeGateway.store.pop(sid, None)
 
-    async def session_messages(self, sid, *, limit=None):
+    async def session_messages(self, sid, *, limit=None, profile=None):
         return [{"role": "user", "content": "hi"}]
 
-    async def chat_stream(self, sid, message):
+    async def chat_stream(self, sid, message, *, profile=None):
+        FakeGateway.calls.append(("chat", sid, profile))
         for f in FakeGateway.stream_frames:
             yield f
 

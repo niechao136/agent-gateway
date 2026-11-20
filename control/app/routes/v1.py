@@ -209,6 +209,7 @@ async def post_message(
     agent = await _resolve_agent_for_key(session, ka, slug)
     conv = await _get_or_create_session(session, agent, body.session_id)
     sid = conv.hermes_session_id
+    profile = agent.profile_name
 
     if body.stream:
         async def gen():
@@ -216,7 +217,7 @@ async def post_message(
             try:
                 async with gw:
                     async for frame in chat_proxy.translate_stream(
-                        gw.chat_stream(sid, body.message), thread_id=sid
+                        gw.chat_stream(sid, body.message, profile=profile), thread_id=sid
                     ):
                         yield frame
             finally:
@@ -242,7 +243,7 @@ async def post_message(
     try:
         async with gw:
             async for frame in chat_proxy.translate_stream(
-                gw.chat_stream(sid, body.message), thread_id=sid
+                gw.chat_stream(sid, body.message, profile=profile), thread_id=sid
             ):
                 text, u = chat_proxy.extract_text_and_usage(frame)
                 if text:
@@ -315,7 +316,9 @@ async def get_session_messages(
 
     async with gw_mod.GatewayClient() as gw:
         try:
-            raw = await gw.session_messages(conv.hermes_session_id, limit=limit)
+            raw = await gw.session_messages(
+                conv.hermes_session_id, limit=limit, profile=agent.profile_name
+            )
         except gw_mod.GatewayError as exc:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"读取历史失败: {exc}") from exc
 
