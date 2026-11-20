@@ -133,7 +133,10 @@ async def _agent_card_response(slug: str, request: Request, session: AsyncSessio
     agent = (await session.execute(select(Agent).where(Agent.slug == slug))).scalar_one_or_none()
     if agent is None or agent.status != AgentStatus.PUBLISHED:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在或未发布")
-    return _card(agent, str(request.base_url))
+    # 反代场景：request.base_url 可能是内部容器名，优先用对外 Host + X-Forwarded-Proto
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = request.headers.get("host", request.url.netloc)
+    return _card(agent, f"{proto}://{host}")
 
 
 @router.get("/a2a/{slug}/.well-known/agent-card.json")
