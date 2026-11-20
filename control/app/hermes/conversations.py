@@ -162,10 +162,10 @@ async def create_conversation_for_agent(
 ) -> Conversation:
     """为 Agent 创建会话，不关联登录用户（对外 API / 连接器用，批次 3）。
 
-    user_id 存 0 表示系统来源；title 带来源前缀避免与用户会话混淆。
+    user_id 用 Agent 所有者（必须是有效 users.id，否则 PG 外键约束失败）；title 带来源前缀避免与用户会话混淆。
     hermes 侧同样不传 title（全局唯一约束，见 create_conversation 注释）。
     """
-    sid = new_session_id(0, prefix=source)
+    sid = new_session_id(agent.owner_id, prefix=source)
 
     async with GatewayClient() as gw:
         try:
@@ -174,7 +174,7 @@ async def create_conversation_for_agent(
             raise ConversationError(f"创建 hermes 会话失败: {exc}") from exc
 
     conv = Conversation(
-        user_id=0,
+        user_id=agent.owner_id,
         agent_id=agent.id,
         hermes_session_id=sid,
         title=f"[{source}] {agent.slug}",
