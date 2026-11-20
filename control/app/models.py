@@ -198,6 +198,9 @@ class A2AOutboundEndpoint(Base):
     )
     name: Mapped[str] = mapped_column(String(64))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # external=外部 A2A 服务；internal=本平台其它 Agent（经 /a2a/{slug} 调用）
+    target_type: Mapped[str] = mapped_column(String(16), default="external", server_default="external")
+    target_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url: Mapped[str] = mapped_column(String(512))
     capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
     timeout: Mapped[int] = mapped_column(Integer, default=120)

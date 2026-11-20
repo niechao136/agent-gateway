@@ -464,6 +464,8 @@ export interface A2AEndpoint {
   name: string;
   owner_id: number;
   description: string | null;
+  target_type: "external" | "internal";
+  target_agent_id: number | null;
   url: string;
   capabilities: string[] | null;
   timeout: number;
@@ -477,7 +479,9 @@ export interface A2AEndpoint {
 export interface A2AEndpointBody {
   name: string;
   description?: string;
-  url: string;
+  url?: string;
+  target_type?: "external" | "internal";
+  target_agent_id?: number | null;
   capabilities?: string[];
   timeout?: number;
   auth_type?: AuthType;
@@ -485,6 +489,11 @@ export interface A2AEndpointBody {
   auth_name?: string;
   is_shared?: boolean;
   enabled?: boolean;
+}
+
+/** 已发布的 Agent（供 A2A 内部互调选择目标） */
+export async function listPublishedAgents(): Promise<Agent[]> {
+  return request<Agent[]>("/chat/agents");
 }
 
 export async function listA2AEndpoints(): Promise<A2AEndpoint[]> {

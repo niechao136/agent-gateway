@@ -12,6 +12,10 @@ import Chip from "@mui/material/Chip";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
@@ -25,9 +29,11 @@ import {
   deleteA2AEndpoint,
   getA2AInbound,
   listA2AEndpoints,
+  listPublishedAgents,
   pingA2AInbound,
   updateA2AEndpoint,
   type A2AEndpoint,
+  type Agent,
 } from "@/lib/api";
 import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
@@ -40,6 +46,8 @@ interface Form {
   name: string;
   description: string;
   url: string;
+  target_type: "external" | "internal";
+  target_agent_id: number | null;
   timeout: string;
   auth_type: (typeof AUTH_TYPES)[number];
   token: string;
@@ -50,6 +58,8 @@ const EMPTY: Form = {
   name: "",
   description: "",
   url: "",
+  target_type: "external",
+  target_agent_id: null,
   timeout: "120",
   auth_type: "none",
   token: "",
@@ -65,13 +75,16 @@ function A2aInner() {
   const [editing, setEditing] = useState<A2AEndpoint | null>(null);
   const [form, setForm] = useState<Form>(EMPTY);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [eps, ib] = await Promise.all([
+      const [eps, ib, ags] = await Promise.all([
         listA2AEndpoints(),
         getA2AInbound().catch(() => null),
+        listPublishedAgents().catch(() => []),
       ]);
+      setAgents(ags);
       setEndpoints(eps);
       setInbound(ib as Record<string, unknown> | null);
     } catch (e) {
@@ -95,6 +108,8 @@ function A2aInner() {
       name: e.name,
       description: e.description ?? "",
       url: e.url,
+      target_type: e.target_type,
+      target_agent_id: e.target_agent_id,
       timeout: String(e.timeout),
       auth_type: e.auth_type,
       token: "",
@@ -109,6 +124,8 @@ function A2aInner() {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
         url: form.url.trim(),
+        target_type: form.target_type,
+        target_agent_id: form.target_type === "internal" ? form.target_agent_id : null,
         timeout: Number(form.timeout) || 120,
         auth_type: form.auth_type,
         token: form.token || undefined,
@@ -242,6 +259,42 @@ function A2aInner() {
         <DialogTitle>{editing ? "编辑出站端点" : "新建出站端点"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>目标类型</InputLabel>
+              <Select
+                value={form.target_type}
+                label="目标类型"
+                onChange={(e) => {
+                  const t = e.target.value as "external" | "internal";
+                  setForm({ ...form, target_type: t, target_agent_id: null, url: "" });
+                }}
+              >
+                <MenuItem value="external">外部 A2A 服务</MenuItem>
+                <MenuItem value="internal">本平台 Agent（内部互调）</MenuItem>
+              </Select>
+            </FormControl>
+            {form.target_type === "internal" ? (
+              <FormControl fullWidth>
+                <InputLabel>目标 Agent（须已发布）</InputLabel>
+                <Select
+                  value={form.target_agent_id ?? ""}
+                  label="目标 Agent（须已发布）"
+                  onChange={(e) => {
+                    const aid = Number(e.target.value);
+                    const a = agents.find((x) => x.id === aid);
+                    setForm({
+                      ...form,
+                      target_agent_id: aid,
+                      name: form.name || (a ? `内部-${a.name}` : ""),
+                    });
+                  }}
+                >
+                  {agents.map((a) => (
+                    <MenuItem key={a.id} value={a.id}>{a.name}（{a.slug}）</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
             <TextField
               label="名称"
               value={form.name}
@@ -251,7 +304,8 @@ function A2aInner() {
               label="URL"
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
-              placeholder="http://host:port"
+              placeholder={form.target_type === "internal" ? "内部Agent留空自动填充" : "http://host:port"}
+              disabled={form.target_type === "internal"}
             />
             <TextField
               label="超时（秒）"

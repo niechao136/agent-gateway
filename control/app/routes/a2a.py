@@ -22,6 +22,7 @@ from ..models import (
     A2AOutboundEndpoint,
     Agent,
     AgentA2AEndpoint,
+    AgentStatus,
     UserRole,
 )
 from ..security import CurrentUser, can_modify
@@ -37,7 +38,9 @@ agent_router = APIRouter(prefix="/api/agents", tags=["agent-a2a"])
 class EndpointIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     description: str | None = None
-    url: str
+    url: str = ""
+    target_type: str = "external"
+    target_agent_id: int | None = None
     capabilities: list[str] | None = None
     timeout: int = 120
     auth_type: str = "none"
@@ -50,6 +53,8 @@ class EndpointIn(BaseModel):
 class EndpointUpdateIn(BaseModel):
     description: str | None = None
     url: str | None = None
+    target_type: str | None = None
+    target_agent_id: int | None = None
     capabilities: list[str] | None = None
     timeout: int | None = None
     auth_type: str | None = None
@@ -64,6 +69,8 @@ class EndpointOut(BaseModel):
     name: str
     owner_id: int
     description: str | None
+    target_type: str
+    target_agent_id: int | None
     url: str
     capabilities: list[str] | None
     timeout: int
@@ -80,6 +87,8 @@ def _out(e: A2AOutboundEndpoint) -> EndpointOut:
         name=e.name,
         owner_id=e.owner_id,
         description=e.description,
+        target_type=e.target_type,
+        target_agent_id=e.target_agent_id,
         url=e.url,
         capabilities=e.capabilities,
         timeout=e.timeout,
@@ -155,10 +164,26 @@ async def create_endpoint(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EndpointOut:
     _validate_auth(body)
-    try:
-        validate_endpoint(body.name, body.url)
-    except A2AError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+    url = body.url
+    target_agent = None
+    if body.target_type == "internal":
+        if body.target_agent_id is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "内部 A2A 必须选择目标 Agent")
+        target_agent = (
+            await session.execute(select(Agent).where(Agent.id == body.target_agent_id))
+        ).scalar_one_or_none()
+        if target_agent is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "目标 Agent 不存在")
+        if target_agent.status != AgentStatus.PUBLISHED:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "目标 Agent 尚未发布，无法作为 A2A 端点")
+        # 内部端点 URL 由平台生成，忽略用户填写
+        url = f"/a2a/{target_agent.slug}"
+    else:
+        try:
+            validate_endpoint(body.name, body.url)
+        except A2AError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
     exists = (
         await session.execute(
