@@ -135,7 +135,7 @@ async def _agent_card_response(slug: str, request: Request, session: AsyncSessio
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在或未发布")
     # 反代场景：request.base_url 可能是内部容器名，优先用对外 Host + X-Forwarded-Proto
     proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
-    host = request.headers.get("host", request.url.netloc)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     return _card(agent, f"{proto}://{host}")
 
 
