@@ -496,6 +496,10 @@ export async function listPublishedAgents(): Promise<Agent[]> {
   return request<Agent[]>("/chat/agents");
 }
 
+export async function testA2AEndpoint(id: number): Promise<{ ok: boolean; name?: string; url?: string; message?: string }> {
+  return request(`/a2a/endpoints/${id}/test`, { method: "POST" });
+}
+
 export async function listA2AEndpoints(): Promise<A2AEndpoint[]> {
   return request<A2AEndpoint[]>("/a2a/endpoints");
 }
@@ -873,3 +877,57 @@ export function setAgentKnowledge(
     body: JSON.stringify({ kb_ids }),
   });
 }
+
+// ── 定时自动化任务 ────────────────────────────────────────
+export interface ScheduledTask {
+  id: number;
+  name: string;
+  owner_id: number;
+  enabled: boolean;
+  schedule_kind: "interval" | "cron";
+  every_seconds: number;
+  cron_expr: string | null;
+  action_type: "agent_message" | "a2a_call";
+  target_agent_id: number | null;
+  a2a_endpoint_id: number | null;
+  payload: string;
+  delivery: string;
+  webhook_url: string | null;
+  connector_id: number | null;
+  knowledge_id: number | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string | null;
+}
+
+export interface TaskRunInfo {
+  id: number;
+  started_at: string;
+  status: string;
+  summary: string | null;
+  delivered: string | null;
+}
+
+export const DELIVERY_LABELS: Record<string, string> = {
+  log: "执行日志",
+  session: "存入会话",
+  webhook: "Webhook",
+  connector: "发送到连接器",
+  knowledge: "写入知识库",
+};
+
+export function listTasks(): Promise<ScheduledTask[]> { return request("/tasks"); }
+export function createTask(body: Partial<ScheduledTask>): Promise<ScheduledTask> {
+  return request("/tasks", { method: "POST", body: JSON.stringify(body) });
+}
+export function updateTask(id: number, body: Partial<ScheduledTask>): Promise<ScheduledTask> {
+  return request(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+export function deleteTask(id: number): Promise<void> {
+  return request(`/tasks/${id}`, { method: "DELETE" });
+}
+export function runTaskNow(id: number): Promise<{ ok: boolean; summary: string }> {
+  return request(`/tasks/${id}/run`, { method: "POST" });
+}
+export function listTaskRuns(id: number): Promise<TaskRunInfo[]> { return request(`/tasks/${id}/runs`); }
+

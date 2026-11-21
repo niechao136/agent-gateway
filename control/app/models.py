@@ -469,6 +469,24 @@ class KnowledgeBase(Base):
     )
 
 
+class TaskRun(Base):
+    """定时任务执行记录。"""
+
+    __tablename__ = "task_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("scheduled_tasks.id", ondelete="CASCADE"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    status: Mapped[str] = mapped_column(String(16), default="ok")
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivered: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
 class AgentKnowledgeBase(Base):
     """Agent ↔ 知识库绑定（多对多）。"""
 
@@ -483,4 +501,34 @@ class AgentKnowledgeBase(Base):
     )
     kb_id: Mapped[int] = mapped_column(
         ForeignKey("knowledge_bases.id", ondelete="CASCADE"), index=True
+    )
+
+
+class ScheduledTask(Base):
+    """定时自动化任务：cron/interval 触发 Agent 消息或 A2A 调用，结果按多选方式处理。"""
+
+    __tablename__ = "scheduled_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    schedule_kind: Mapped[str] = mapped_column(String(16), default="interval")
+    every_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    cron_expr: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(16), default="agent_message")
+    target_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    a2a_endpoint_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[str] = mapped_column(Text, default="")
+    delivery: Mapped[str] = mapped_column(String(255), default="session,log")
+    webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    connector_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    knowledge_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

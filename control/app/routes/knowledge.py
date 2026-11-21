@@ -17,8 +17,8 @@ from ..config import get_settings
 from ..database import get_session
 from ..hermes.rag_sync import (
     RagSyncError,
-    apply_knowledge_skill,
-    remove_knowledge_skill,
+    apply_knowledge_tool,
+    remove_knowledge_tool,
 )
 from ..models import (
     Agent,
@@ -221,7 +221,7 @@ async def delete_kb(
     for b in bound:
         agent = (await session.execute(select(Agent).where(Agent.id == b.agent_id))).scalar_one_or_none()
         if agent:
-            _remove_skill_best_effort(agent.profile_name)
+            _remove_tool_best_effort(agent.profile_name)
         await session.delete(b)
     await session.flush()
     await session.delete(k)
@@ -287,35 +287,35 @@ async def set_agent_kb(
             session.add(AgentKnowledgeBase(agent_id=agent_id, kb_id=k.id))
         await session.flush()
 
-    sync = _sync_skill(agent.profile_name, kbs)
+    sync = _sync_tool(agent.profile_name, kbs)
     await session.commit()
     return {"bound": len(kbs), "sync": sync}
 
 
 # ── 同步辅助 ──────────────────────────────────────────────
-def _sync_skill(profile: str, kbs: list[KnowledgeBase]) -> dict:
+def _sync_tool(profile: str, kbs: list[KnowledgeBase]) -> dict:
+    """写入 RAGFlow 检索工具配置（stdio MCP + .env 允许列表）。"""
     if not kbs:
-        return _remove_skill_best_effort(profile)
+        return _remove_tool_best_effort(profile)
     first = next((k for k in kbs if k.enabled), kbs[0])
     try:
-        return apply_knowledge_skill(
+        return apply_knowledge_tool(
             profile,
-            _settings.hermes_data_root,
             base_url=first.base_url,
             api_key=first.api_key,
             dataset_ids=[k.dataset_id for k in kbs if k.dataset_id],
         )
     except RagSyncError as exc:
-        logger.warning("知识库 skill 下发失败(profile=%s): %s", profile, exc)
-        return {"skill": None, "error": str(exc)}
+        logger.warning("知识库工具下发失败(profile=%s): %s", profile, exc)
+        return {"tool": None, "error": str(exc)}
 
 
-def _remove_skill_best_effort(profile: str) -> dict:
+def _remove_tool_best_effort(profile: str) -> dict:
     try:
-        return remove_knowledge_skill(profile, _settings.hermes_data_root)
+        return remove_knowledge_tool(profile)
     except Exception as exc:  # noqa: BLE001 - 清理失败不阻断解绑
-        logger.warning("知识库 skill 清理失败(profile=%s): %s", profile, exc)
-        return {"skill": None, "error": str(exc)}
+        logger.warning("知识库工具清理失败(profile=%s): %s", profile, exc)
+        return {"tool": None, "error": str(exc)}
 
 
 async def _sync_bound_agents(session: AsyncSession, k: KnowledgeBase) -> None:
@@ -334,4 +334,4 @@ async def _sync_bound_agents(session: AsyncSession, k: KnowledgeBase) -> None:
                     .where(AgentKnowledgeBase.agent_id == aid)
                 )
             ).scalars().all()
-            _sync_skill(agent.profile_name, list(kbs))
+            _sync_tool(agent.profile_name, list(kbs))

@@ -55,29 +55,52 @@ async def cleanup_loop(stop: asyncio.Event) -> None:
             continue
 
 
+async def task_loop(stop: asyncio.Event) -> None:
+    """定时自动化任务：每 20 秒扫描到期任务。"""
+    while not stop.is_set():
+        try:
+            from .task_runner import run_due_tasks
+
+            await run_due_tasks()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("定时任务扫描异常")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=20)
+        except TimeoutError:
+            continue
+
+
 class CleanupTask:
     """持有后台任务句柄，便于应用关闭时优雅停止。"""
 
     def __init__(self) -> None:
         self._stop = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._task_scheduler: asyncio.Task | None = None
 
     def start(self) -> None:
         if self._task is not None:
             return
         self._task = asyncio.create_task(cleanup_loop(self._stop), name="conversation-cleanup")
-        logger.info("会话清理任务已启动（保留期 %s 天）", _retention_days())
+        self._task_scheduler = asyncio.create_task(task_loop(self._stop), name="scheduled-tasks")
+        logger.info("会话清理任务已启动（保留期 %s 天）；定时任务调度已启动", _retention_days())
 
     async def stop(self) -> None:
         if self._task is None:
             return
         self._stop.set()
-        try:
-            await asyncio.wait_for(self._task, timeout=10)
-        except (TimeoutError, asyncio.CancelledError):
-            self._task.cancel()
+        for t in (self._task, self._task_scheduler):
+            if t is None:
+                continue
+            try:
+                await asyncio.wait_for(t, timeout=10)
+            except (TimeoutError, asyncio.CancelledError):
+                t.cancel()
         self._task = None
-        logger.info("会话清理任务已停止")
+        self._task_scheduler = None
+        logger.info("会话清理与定时任务调度已停止")
 
 
 def _retention_days() -> int:

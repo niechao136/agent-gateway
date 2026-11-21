@@ -22,6 +22,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
+import TestIcon from "@mui/icons-material/CheckCircle";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
   ApiError,
@@ -31,6 +32,7 @@ import {
   listA2AEndpoints,
   listPublishedAgents,
   pingA2AInbound,
+  testA2AEndpoint,
   updateA2AEndpoint,
   type A2AEndpoint,
   type Agent,
@@ -100,6 +102,17 @@ function A2aInner() {
     setEditing(null);
     setForm(EMPTY);
     setDialogOpen(true);
+  }
+
+  async function testEndpoint(e: A2AEndpoint) {
+    setOk(null); setError(null);
+    try {
+      const r = await testA2AEndpoint(e.id);
+      if (r.ok) setOk(`连接正常: ${r.name || e.name} (${r.url || e.url})`);
+      else setError(`连接失败: ${r.message || "未知原因"}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "测试失败");
+    }
   }
 
   function openEdit(e: A2AEndpoint) {
@@ -224,7 +237,15 @@ function A2aInner() {
                     variant="outlined"
                   />
                   <Chip size="small" label={`鉴权: ${e.auth_type}`} variant="outlined" />
-                  <Button size="small" onClick={() => openEdit(e)} sx={{ ml: "auto" }}>
+                  <Button size="small" startIcon={<TestIcon />} onClick={async () => {
+                    try {
+                      const r = await testA2AEndpoint(e.id);
+                      setOk(r.ok ? `连通: ${r.name || r.url}` : `失败: ${r.message}`);
+                    } catch (err) { setError(err instanceof ApiError ? err.message : "测试失败"); }
+                  }} sx={{ ml: "auto" }}>
+                    测试
+                  </Button>
+                  <Button size="small" onClick={() => openEdit(e)}>
                     编辑
                   </Button>
                   <Button size="small" color="error" onClick={() => setConfirmId(e.id)}>

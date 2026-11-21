@@ -7,6 +7,8 @@ apply_a2a_endpoints（整体替换 a2a_agents 段）。
 from __future__ import annotations
 
 import logging
+
+import httpx
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -300,6 +302,38 @@ async def delete_endpoint(
 
 
 # ── Agent 绑定 ────────────────────────────────────────────
+@router.post("/{endpoint_id}/test")
+async def test_endpoint(
+    endpoint_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """测试 A2A 端点连通性：拉 Agent Card 并回传基本信息（不回显 token）。"""
+    e = await _ep_or_404(session, endpoint_id, user)
+    card_url = e.url.rstrip("/")
+    if not card_url.endswith("/.well-known/agent-card.json"):
+        card_url += "/.well-known/agent-card.json"
+    auth = {}
+    if e.auth_type == "bearer" and e.token:
+        auth["Authorization"] = "Bearer " + e.token
+    elif e.auth_type == "header" and e.auth_name:
+        auth[e.auth_name] = e.token or ""
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+            r = await c.get(card_url, headers=auth)
+        if r.status_code != 200:
+            return {"ok": False, "message": f"HTTP {r.status_code}"}
+        card = r.json()
+        return {
+            "ok": True,
+            "name": card.get("name", ""),
+            "description": card.get("description"),
+            "url": e.url,
+        }
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)[:200]}
+
+
 async def _agent_owned_or_404(session: AsyncSession, agent_id: int, user) -> Agent:
     agent = (
         await session.execute(select(Agent).where(Agent.id == agent_id))
@@ -359,6 +393,10 @@ async def set_agent_endpoints(
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"端点 {eid} 不存在")
         if e.owner_id != user.id and not e.is_shared:
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"端点 {e.name} 不可绑定（非本人且未共享）")
+        if e.target_type == "internal" and e.target_agent_id == agent_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "不能将 Agent 绑定到自己的 A2A 端点（循环调用）"
+            )
         endpoints.append(e)
 
     old = (
@@ -389,6 +427,10 @@ async def create_and_bind(
 ) -> dict:
     agent = await _agent_owned_or_404(session, agent_id, user)
     _validate_auth(body)
+    if body.target_type == "internal" and body.target_agent_id == agent_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "不能将 Agent 绑定到自己的 A2A 端点（循环调用）"
+        )
 
     exists = (
         await session.execute(

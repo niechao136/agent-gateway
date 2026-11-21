@@ -29,6 +29,7 @@ from .routes import (
     mcp as mcp_routes,
     models as model_routes,
     skills as skill_routes,
+    tasks as task_routes,
     toolsets as toolset_routes,
     users,
     v1 as v1_routes,
@@ -114,6 +115,7 @@ app.include_router(mcp_routes.router)      # /api/mcp
 app.include_router(mcp_routes.agent_router)  # /api/agents/{id}/mcp
 app.include_router(knowledge_routes.router)      # /api/knowledge
 app.include_router(knowledge_routes.agent_router)  # /api/agents/{id}/knowledge
+app.include_router(task_routes.router)      # /api/tasks 定时任务
 app.include_router(a2a_routes.router)      # /api/a2a/endpoints
 app.include_router(a2a_routes.agent_router)  # /api/agents/{id}/a2a
 app.include_router(skill_routes.router)    # /api/skills

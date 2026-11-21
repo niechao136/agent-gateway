@@ -25,6 +25,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import {
   ApiError,
   applyModelTemplate,
+  getEffectiveModel,
   bindAgentSkills,
   createAgentAPIKey,
   createAndBindA2A,
@@ -82,6 +83,7 @@ function EditInner() {
   // 模型
   const [templates, setTemplates] = useState<ModelTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<number | "">("");
+  const [effectiveModel, setEffectiveModel] = useState<Record<string, unknown> | null>(null);
 
   // MCP
   const [mcpAll, setMcpAll] = useState<MCPServer[]>([]);
@@ -117,8 +119,9 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind] = await Promise.all([
+      const [tpl, eff, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind] = await Promise.all([
         listModelTemplates().catch(() => []),
+        getEffectiveModel(id).catch(() => ({ profile: "", model: {} })),
         listMCPServers().catch(() => []),
         getAgentMCP(id).catch(() => ({ bound: [] as MCPServer[] })),
         listAgentAPIKeys(id).catch(() => []),
@@ -131,6 +134,7 @@ function EditInner() {
         getAgentKnowledge(id).catch(() => ({ bound: [] as number[] })),
       ]);
       setTemplates(tpl);
+      setEffectiveModel(eff.model ?? {});
       setMcpAll(mcp);
       setMcpBound((bind.bound ?? []).map((m) => m.id));
       setKeys(ks);
@@ -176,6 +180,8 @@ function EditInner() {
     setBusy(true);
     try {
       await applyModelTemplate(id, Number(selectedTemplate));
+      const eff = await getEffectiveModel(id).catch(() => null);
+      if (eff) setEffectiveModel(eff.model ?? {});
       setOk("模型已应用");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "应用失败");
@@ -366,6 +372,21 @@ function EditInner() {
       )}
 
       {tab === 2 && (
+        <>
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>当前生效的模型（来自该 Agent 的 profile 配置）</Typography>
+            {Object.keys(effectiveModel ?? {}).length === 0 ? (
+              <Typography variant="body2" color="text.secondary">尚未应用模型。请在下方选择模板并应用。</Typography>
+            ) : (
+              <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+                {Object.entries(effectiveModel ?? {}).map(([k, v]) => (
+                  <Chip key={k} size="small" variant="outlined" label={`${k}: ${String(v)}`} />
+                ))}
+              </Stack>
+            )}
+          </CardContent>
+        </Card>
         <Card>
           <CardContent>
             <Stack spacing={2}>
@@ -398,6 +419,7 @@ function EditInner() {
             </Stack>
           </CardContent>
         </Card>
+        </>
       )}
 
       {tab === 3 && (

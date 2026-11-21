@@ -28,6 +28,7 @@ import CableIcon from "@mui/icons-material/Cable";
 import HubIcon from "@mui/icons-material/Hub";
 import KeyIcon from "@mui/icons-material/Key";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import ScheduleIcon from "@mui/icons-material/Schedule";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import MenuIcon from "@mui/icons-material/Menu";
@@ -59,6 +60,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/a2a", label: "A2A", icon: <HubIcon /> },
   { href: "/admin/api-keys", label: "API 密钥", icon: <KeyIcon /> },
   { href: "/admin/users", label: "用户管理", icon: <AdminPanelSettingsIcon />, adminOnly: true },
+  { href: "/admin/tasks", label: "定时任务", icon: <ScheduleIcon /> },
 ];
 
 /**
