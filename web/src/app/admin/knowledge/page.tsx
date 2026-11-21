@@ -62,7 +62,7 @@ const EMPTY: Form = {
 
 export default function KnowledgePage() {
   return (
-    <GuardedShell require="user">
+    <GuardedShell>
       <AdminShell>
         <KnowledgeInner />
       </AdminShell>

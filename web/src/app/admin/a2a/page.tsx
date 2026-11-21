@@ -286,6 +286,7 @@ function A2aInner() {
                       ...form,
                       target_agent_id: aid,
                       name: form.name || (a ? `内部-${a.name}` : ""),
+                      url: a ? `/a2a/${a.slug}` : "",  // 内部端点 URL 自动生成，只读展示
                     });
                   }}
                 >
@@ -304,7 +305,7 @@ function A2aInner() {
               label="URL"
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
-              placeholder={form.target_type === "internal" ? "内部Agent留空自动填充" : "http://host:port"}
+              placeholder={form.target_type === "internal" ? "选择内部 Agent 后自动生成" : "http://host:port"}
               disabled={form.target_type === "internal"}
             />
             <TextField
@@ -326,7 +327,7 @@ function A2aInner() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>取消</Button>
-          <Button variant="contained" disabled={!form.name.trim() || !form.url.trim()} onClick={() => void submit()}>
+          <Button variant="contained" disabled={!form.name.trim() || (form.target_type === "external" ? !form.url.trim() : !form.target_agent_id)} onClick={() => void submit()}>
             保存
           </Button>
         </DialogActions>
