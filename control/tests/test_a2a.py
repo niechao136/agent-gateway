@@ -108,5 +108,23 @@ async def test_bind_others_private_403(client):
     assert r.status_code == 403
 
 
+async def test_internal_endpoint_autofills_url(client):
+    """内部 A2A 端点：选目标 Agent 后 URL 自动生成且字段正确落库（回归）。"""
+    tok = await _user_token(client, "a2ainternal")
+    aid = await _agent(client, tok, slug="ainternal")
+    await client.post(f"/api/agents/{aid}/publish", headers=_h(tok))
+
+    r = await client.post(
+        "/api/a2a/endpoints",
+        headers=_h(tok),
+        json={"name": "内部目标", "target_type": "internal", "target_agent_id": aid, "url": ""},
+    )
+    assert r.status_code == 201, r.text
+    b = r.json()
+    assert b["target_type"] == "internal"
+    assert b["target_agent_id"] == aid
+    assert b["url"] == "/a2a/ainternal"
+
+
 async def test_requires_login(client):
     assert (await client.get("/api/a2a/endpoints")).status_code == 401

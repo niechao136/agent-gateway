@@ -199,7 +199,9 @@ async def create_endpoint(
         owner_id=user.id,
         name=body.name,
         description=body.description,
-        url=body.url,
+        target_type=body.target_type,
+        target_agent_id=body.target_agent_id,
+        url=url,  # 内部端点为上面自动生成的 /a2a/{slug}，外部为用户填写
         capabilities=body.capabilities,
         timeout=body.timeout,
         auth_type=body.auth_type,
@@ -239,16 +241,24 @@ async def update_endpoint(
     if body.token is not None:
         e.token = body.token or None
     for field in ("description", "url", "capabilities", "timeout", "auth_type",
-                  "auth_name", "enabled"):
+                  "auth_name", "enabled", "target_type", "target_agent_id"):
         v = getattr(body, field)
         if v is not None:
             setattr(e, field, v)
+    # 切到内部模式时按目标 Agent 自动生成 URL
+    if body.target_type == "internal" and body.target_agent_id is not None:
+        target = (
+            await session.execute(select(Agent).where(Agent.id == body.target_agent_id))
+        ).scalar_one_or_none()
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "目标 Agent 不存在")
+        e.url = f"/a2a/{target.slug}"
     if body.is_shared is not None:
         if user.role != UserRole.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "共享/取消共享需要管理员")
         e.is_shared = body.is_shared
 
-    if body.url is not None:
+    if body.url is not None and e.target_type != "internal":
         try:
             validate_endpoint(e.name, e.url)
         except A2AError as exc:
