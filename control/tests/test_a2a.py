@@ -126,5 +126,40 @@ async def test_internal_endpoint_autofills_url(client):
     assert b["url"] == "/a2a/ainternal"
 
 
+async def test_internal_endpoint_test_uses_public_base(client, monkeypatch):
+    """内部端点测试：相对URL应用PUBLIC_BASE_URL拼成绝对URL（回归）。"""
+    import httpx
+
+    class FakeAsyncClient:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        async def get(self, url, headers=None):
+            assert url.startswith("https://pub.example.com/a2a/"), url
+            return httpx.Response(200, json={"name": "目标 Agent"})
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://pub.example.com")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    tok = await _user_token(client, "a2atest")
+    aid = await _agent(client, tok, slug="atest")
+    await client.post(f"/api/agents/{aid}/publish", headers=_h(tok))
+    r = await client.post(
+        "/api/a2a/endpoints",
+        headers=_h(tok),
+        json={"name": "int", "target_type": "internal", "target_agent_id": aid},
+    )
+    eid = r.json()["id"]
+    r = await client.post(f"/api/a2a/endpoints/{eid}/test", headers=_h(tok))
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert r.json()["name"] == "目标 Agent"
+
+
 async def test_requires_login(client):
     assert (await client.get("/api/a2a/endpoints")).status_code == 401

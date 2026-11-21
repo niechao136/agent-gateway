@@ -140,8 +140,10 @@ function EditInner() {
       setKeys(ks);
       setSkillsAll(skAll);
       setSkillBound((skBind.bound ?? []).map((s) => s.id));
-      setA2aAll(a2aAllR);
-      setA2aBound((a2aBind.bound ?? []).map((e) => e.id));
+      const a2aVisible = a2aAllR.filter((ep) => ep.target_agent_id !== id);
+      setA2aAll(a2aVisible);
+      const visibleIds = new Set(a2aVisible.map((ep) => ep.id));
+      setA2aBound((a2aBind.bound ?? []).map((e) => e.id).filter((eid) => visibleIds.has(eid)));
       setBuiltinSkills(bs.skills ?? []);
       setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
       setKnowledgeAll(kbAll);

@@ -7,6 +7,7 @@ apply_a2a_endpoints（整体替换 a2a_agents 段）。
 from __future__ import annotations
 
 import logging
+import os
 
 import httpx
 from typing import Annotated
@@ -311,6 +312,11 @@ async def test_endpoint(
     """测试 A2A 端点连通性：拉 Agent Card 并回传基本信息（不回显 token）。"""
     e = await _ep_or_404(session, endpoint_id, user)
     card_url = e.url.rstrip("/")
+    # 内部端点存的是相对路径 /a2a/{slug}，需拼上对外 base URL 才能探测
+    if card_url.startswith("/"):
+        card_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") + card_url
+    if not card_url:
+        return {"ok": False, "message": "端点 URL 为空，且未配置 PUBLIC_BASE_URL"}
     if not card_url.endswith("/.well-known/agent-card.json"):
         card_url += "/.well-known/agent-card.json"
     auth = {}
