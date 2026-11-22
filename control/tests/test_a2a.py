@@ -161,5 +161,29 @@ async def test_internal_endpoint_test_uses_public_base(client, monkeypatch):
     assert r.json()["name"] == "目标 Agent"
 
 
+def test_apply_a2a_absolute_url_and_enables_toolset(tmp_path, monkeypatch):
+    """内部端点相对 URL 转绝对；同步时自动从 disabled_toolsets 移除 a2a。"""
+    import yaml
+    from app.hermes import a2a as a2a_sync
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://pub.example.com")
+    prof = tmp_path / "profiles" / "agent-u1-test"
+    prof.mkdir(parents=True)
+    cfg = prof / "config.yaml"
+    cfg.write_text(
+        "agent:\n  disabled_toolsets:\n  - a2a\n  - terminal\nmodel:\n  default: x\n",
+        encoding="utf-8",
+    )
+    res = a2a_sync.apply_a2a_endpoints(
+        "agent-u1-test", str(tmp_path),
+        [{"name": "内部地图", "url": "/a2a/map"}],
+    )
+    assert res["written"] == 1
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert data["a2a_agents"]["内部地图"]["url"] == "https://pub.example.com/a2a/map"
+    assert "a2a" not in data["agent"]["disabled_toolsets"]
+    assert "terminal" in data["agent"]["disabled_toolsets"]
+
+
 async def test_requires_login(client):
     assert (await client.get("/api/a2a/endpoints")).status_code == 401

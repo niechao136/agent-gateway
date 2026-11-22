@@ -27,7 +27,9 @@ DEFAULT_DISABLED: tuple[str, ...] = (
     "skills",          # skill_manage 可自写技能
     "memory",          # 跨会话记忆，有泄漏风险
     "subagents",       # 子 agent 编排
-    "a2a",             # agent 间调用
+    # 注意：a2a 不默认禁用。A2A 工具集是 config-gated 的——Hermes 只在 profile
+    # 配置了 a2a_agents 时才向模型暴露 a2a_call 等工具，且只能调用已绑定的 peer，
+    # 无绑定时无外联能力，因此默认保留；禁用它会导致绑定了端点的 Agent 看不到工具。
 )
 
 # 允许保留的 toolset 白名单（用于校验请求里的 disabled_toolsets 之外，

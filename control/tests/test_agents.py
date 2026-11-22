@@ -41,6 +41,11 @@ def test_default_keeps_web():
     assert "web" not in ts.default_disabled()
 
 
+def test_default_keeps_a2a():
+    """A2A 工具集是 config-gated（只有绑定 peer 才暴露工具），不能默认禁用。"""
+    assert "a2a" not in ts.default_disabled()
+
+
 def test_normalize_dedupes_and_sorts():
     assert ts.normalize_disabled(["web", "web", "terminal", "bogus-unknown"]) == [
         "terminal",

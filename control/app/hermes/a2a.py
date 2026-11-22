@@ -72,12 +72,41 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
+def _absolute_a2a_url(url: str) -> str:
+    """相对 URL（/a2a/xxx）补全为对外可访问地址。
+
+    Hermes 的 a2a_call 工具需要 http(s):// 绝对地址；内部端点存的是相对路径。
+    """
+    url = (url or "").strip()
+    if url.startswith(("http://", "https://")):
+        return url
+    if url.startswith("/"):
+        import os
+
+        base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        if base:
+            return base + url
+    return url
+
+
+def _absolute_a2a_url(url: str) -> str:
+    """内部端点存的是相对路径 /a2a/<slug>，转成对外绝对 URL。"""
+    url = (url or "").strip()
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if url.startswith("/"):
+        base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        return f"{base}{url}" if base else url
+    return url
+
+
 def apply_a2a_endpoints(
     profile: str, data_root: str, endpoints: list[dict]
 ) -> dict:
     """把端点列表写入 profile 的 config.yaml 的 a2a_agents 段。
 
     会**整体替换** a2a_agents，避免残留已删除的端点。
+    同时确保 a2a toolset 未被禁用（否则模型看不到 a2a_call 工具）。
     其他配置段原样保留。
     """
     path = profile_config_path(profile, data_root)
@@ -95,7 +124,7 @@ def apply_a2a_endpoints(
     if endpoints:
         section: dict = {}
         for ep in endpoints:
-            entry: dict = {"url": ep["url"]}
+            entry: dict = {"url": _absolute_a2a_url(ep["url"])}
             caps = ep.get("capabilities") or []
             if caps:
                 entry["capabilities"] = list(caps)
@@ -105,6 +134,12 @@ def apply_a2a_endpoints(
                 entry["auth"] = {"type": "bearer", "token": ep["token"]}
             section[ep["name"]] = entry
         cfg["a2a_agents"] = section
+        # 绑定了端点就必须启用 a2a toolset，否则 Hermes 不会向模型暴露 a2a_call。
+        agent_cfg = cfg.get("agent")
+        if isinstance(agent_cfg, dict):
+            disabled = agent_cfg.get("disabled_toolsets")
+            if isinstance(disabled, list) and "a2a" in disabled:
+                agent_cfg["disabled_toolsets"] = [x for x in disabled if x != "a2a"]
     else:
         cfg.pop("a2a_agents", None)
 
