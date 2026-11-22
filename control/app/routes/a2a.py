@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC, datetime
 
 import httpx
 from typing import Annotated
@@ -24,10 +25,12 @@ from ..hermes.auth_scheme import AUTH_TYPES
 from ..models import (
     A2AOutboundEndpoint,
     Agent,
+    AgentAPIKey,
     AgentA2AEndpoint,
     AgentStatus,
     UserRole,
 )
+from ..routes.api_keys import generate_key
 from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
@@ -182,6 +185,23 @@ async def create_endpoint(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "目标 Agent 尚未发布，无法作为 A2A 端点")
         # 内部端点 URL 由平台生成，忽略用户填写
         url = f"/a2a/{target_agent.slug}"
+        # 平台内 Agent 互调需要目标 Agent 的 API Key（a2a_server 鉴权）。
+        # 内部端点开箱即用：未显式提供 token 时，自动为目标 Agent 生成一个专用 Key 明文，
+        # 写入端点 token（→ config.yaml 的 a2a_agents.auth.token）。明文不回传给前端。
+        if not body.token:
+            from .api_keys import generate_key
+
+            plain, key_hash, key_prefix = generate_key()
+            session.add(AgentAPIKey(
+                agent_id=target_agent.id,
+                name=f"a2a-internal-{body.name[:40]}",
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                enabled=True,
+                created_at=datetime.now(UTC),
+            ))
+            body.token = plain
+            body.auth_type = "bearer"
     else:
         try:
             validate_endpoint(body.name, body.url)
