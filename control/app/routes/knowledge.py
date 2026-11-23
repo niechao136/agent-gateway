@@ -160,7 +160,8 @@ async def create_kb(
         **payload,
     )
     session.add(k)
-    await session.flush()
+    await session.commit()
+    await session.refresh(k)
     return _out(k)
 
 
