@@ -854,7 +854,10 @@ export function listRagflowDatasets(body: {
   base_url: string;
   api_key: string;
 }): Promise<{ datasets: DatasetItem[] }> {
-  return request("/knowledge/datasets", { method: "POST", body: JSON.stringify(body) });
+  const q = new URLSearchParams({ base_url: body.base_url, api_key: body.api_key });
+  return request<DatasetItem[]>(`/knowledge/list-datasets?${q.toString()}`).then((datasets) => ({
+    datasets,
+  }));
 }
 
 export function testKnowledgeBase(id: number): Promise<{ ok: boolean; message: string }> {

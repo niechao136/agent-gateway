@@ -183,6 +183,22 @@ async def test_kb(
     return {"ok": True, "message": f"连接成功，共 {len(datasets)} 个知识库"}
 
 
+@router.post("/{kb_id}/test")
+async def test_kb_saved(
+    kb_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+):
+    """用已保存的知识库凭证测试连接。"""
+    kb = (await session.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))).scalar_one_or_none()
+    if kb is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "知识库不存在")
+    if not can_modify(user, kb.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的知识库")
+    datasets = await _ragflow_datasets(kb.base_url, kb.api_key)
+    return {"ok": True, "message": f"连接成功，共 {len(datasets)} 个知识库"}
+
+
 @router.patch("/{kb_id}", response_model=KbOut)
 async def update_kb(
     kb_id: int,
