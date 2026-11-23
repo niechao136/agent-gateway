@@ -188,7 +188,7 @@ async def test_kb(
 async def test_kb_saved(
     kb_id: int,
     user: CurrentUser,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: AsyncSession = Depends(get_session),
 ):
     """用已保存的知识库凭证测试连接。"""
     kb = (await session.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))).scalar_one_or_none()
