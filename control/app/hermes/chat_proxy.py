@@ -126,12 +126,10 @@ def _tool_event(obj: dict, event_name: str | None) -> tuple[str, str | None] | N
         out = obj.get("output") or obj.get("result") or obj.get("delta")
         return name, (str(out)[:2000] if out is not None else "")
     if "start" in phase:
-        # 部分事件即使叫 start 也带 delta（增量输出），有就回填
-        d = obj.get("delta") or obj.get("output") or obj.get("result")
-        return name, (str(d)[:2000] if d is not None else None)
-    # tool.progress 中间态：把 delta 作为增量输出回填，让前端能即时展开详情
-    d = obj.get("delta") or obj.get("output") or obj.get("result") or obj.get("message")
-    return name, (str(d)[:2000] if d is not None else None)
+        return name, None
+    # tool.progress 的中间态：当作 start（前端显示"正在调用"）。
+    # delta 是进度提示（如 "searching"）而非工具结果，不回填到 output。
+    return name, None
 
 
 async def translate_stream(
