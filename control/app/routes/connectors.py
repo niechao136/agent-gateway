@@ -58,6 +58,7 @@ class ConnectorOut(BaseModel):
     agent_slug: str | None = None
     credentials: dict[str, str]  # 脱敏后
     enabled: bool
+    status: dict | None = None  # 运行时状态（registry 内存态）
 
 
 def _redact(platform: str, creds: dict) -> dict:

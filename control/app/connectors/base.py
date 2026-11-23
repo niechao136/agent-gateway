@@ -148,21 +148,32 @@ class ConnectorRunner(ABC):
                 logger.error("连接器 %s 绑定的 Agent 不存在", cid)
                 return
 
-            conv = (
-                await session.execute(
-                    select(Conversation).where(
-                        Conversation.agent_id == agent.id,
-                        Conversation.hermes_session_id == f"ag_{self.platform}{cid}_{chat_id}",
+            # 用平台/chat 作为 title 前缀，便于检索；session id 完全交给 hermes 生成，
+            # 不能手动覆盖——否则 DB 存的 sid 与 hermes 里的不一致，查历史必然 404。
+            # 匹配键只取 chat_id 前 16 位：飞书 chat_id 含 _ 等 LIKE 元字符，且兼容
+            # 旧格式 [feishu{cid}_{chat_id前11}] 与新格式 [feishu:{cid}:{chat_id}]。
+            short = chat_id[:11]  # 兼容旧会话 title 里截断的 chat_id
+            candidates = (
+                f"[{self.platform}{cid}_{short}%",   # 旧格式
+                f"[{self.platform}:{cid}:{short}%",  # 新格式
+            )
+            conv = None
+            for marker in candidates:
+                conv = (
+                    await session.execute(
+                        select(Conversation).where(
+                            Conversation.agent_id == agent.id,
+                            Conversation.title.like(marker),
+                        )
                     )
-                )
-            ).scalar_one_or_none()
+                ).scalar_one_or_none()
+                if conv is not None:
+                    break
             if conv is None:
-                # 每 chat 一个 hermes 会话；session id 前缀带平台名便于排查
                 conv = await conv_svc.create_conversation_for_agent(
-                    session, agent=agent, source=f"{self.platform}{cid}_{chat_id}"[:20]
+                    session, agent=agent, source=f"{self.platform}{cid}"[:20]
                 )
-                # 统一可读的 session id：重命名为 {platform}{cid}_{chat_id}
-                conv.hermes_session_id = f"ag_{self.platform}{cid}_{chat_id}"
+                conv.title = f"[{self.platform}{cid}_{short}] " + conv.title
                 await session.commit()
 
             sid = conv.hermes_session_id
