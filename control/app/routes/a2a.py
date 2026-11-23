@@ -526,12 +526,22 @@ def _payload(endpoints: list[A2AOutboundEndpoint]) -> list[dict]:
 
 async def _sync_profile(session: AsyncSession, agent: Agent) -> dict:
     try:
-        return apply_a2a_endpoints(
+        res = apply_a2a_endpoints(
             agent.profile_name, _settings.hermes_data_root, _payload(await _bound_endpoints(session, agent.id))
         )
     except A2AError as exc:
         logger.warning("A2A 同步失败（agent=%s）：%s", agent.slug, exc)
         return {"ok": False, "error": str(exc)}
+    # 绑定/解绑 A2A 后同步强制工具集（a2a；含 platform_toolsets.api_server 真实启用）
+    try:
+        from ..hermes.toolset_forcing import apply_forced_toolsets, compute_forced
+
+        forced = await compute_forced(agent, session)
+        apply_forced_toolsets(agent, forced)
+        res["forced_toolsets"] = forced
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("同步强制工具集失败（agent=%s）：%s", agent.slug, exc)
+    return res
 
 
 async def _sync_agent_by_id(session: AsyncSession, agent_id: int) -> None:

@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..database import get_session
 from ..hermes.skill_sync import SkillSyncError, apply_custom_skills, remove_skill_dir
+from ..hermes.toolset_forcing import apply_forced_toolsets as _apply_forced_toolsets
+from ..hermes.toolset_forcing import compute_forced as _compute_forced
 from ..hermes.skills import SkillError, list_skills, toggle_skill
 from ..models import (
     Agent,
@@ -30,6 +32,15 @@ from ..models import (
 from ..security import CurrentUser, can_modify
 
 logger = logging.getLogger(__name__)
+
+
+async def _sync_forced(agent: "Agent", session: "AsyncSession") -> None:
+    """绑定/解绑 Skill 后同步强制工具集（skills / scripts→terminal）。"""
+    try:
+        forced = await _compute_forced(agent, session)
+        _apply_forced_toolsets(agent, forced)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("同步强制工具集失败（agent=%s）：%s", agent.slug, exc)
 _settings = get_settings()
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -437,6 +448,7 @@ async def set_agent_builtin_skills(
             errors.append(f"开启 {name}: {exc}")
         changed.append(name)
 
+    await _sync_forced(agent, session)
     await session.commit()
     return {
         "agent_id": agent_id,
@@ -521,6 +533,7 @@ async def set_agent_skills(
     await session.flush()
 
     res = _apply_profile(agent, skills)
+    await _sync_forced(agent, session)
     await session.commit()
     return {"bound": len(skills), "sync": res}
 
@@ -585,6 +598,7 @@ async def create_and_bind_skill(
         ).scalars().all()
     )
     res = _apply_profile(agent, bound)
+    await _sync_forced(agent, session)
     await session.commit()
     return {"created": created, "skill": _out(s).model_dump(), "sync": res}
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
@@ -26,6 +27,7 @@ import {
   ApiError,
   applyModelTemplate,
   getEffectiveModel,
+  getForcedToolsets,
   bindAgentSkills,
   createAgentAPIKey,
   createAndBindA2A,
@@ -79,6 +81,7 @@ function EditInner() {
   const [description, setDescription] = useState("");
   const [soul, setSoul] = useState("");
   const [disabledToolsets, setDisabledToolsets] = useState<string[]>([]);
+  const [forcedToolsets, setForcedToolsets] = useState<Record<string, string>>({});
 
   // 模型
   const [templates, setTemplates] = useState<ModelTemplate[]>([]);
@@ -119,7 +122,7 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, eff, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind] = await Promise.all([
+      const [tpl, eff, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind, forced] = await Promise.all([
         listModelTemplates().catch(() => []),
         getEffectiveModel(id).catch(() => ({ profile: "", model: {} })),
         listMCPServers().catch(() => []),
@@ -132,6 +135,7 @@ function EditInner() {
         listAgentBuiltinSkills(id).catch(() => ({ skills: [] as AgentBuiltinSkill[] })),
         listKnowledgeBases().catch(() => []),
         getAgentKnowledge(id).catch(() => ({ bound: [] as number[] })),
+        getForcedToolsets(id).catch(() => ({ forced: [], reasons: {} })),
       ]);
       setTemplates(tpl);
       setEffectiveModel(eff.model ?? {});
@@ -148,6 +152,7 @@ function EditInner() {
       setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
       setKnowledgeAll(kbAll);
       setKnowledgeBound(kbBind.bound ?? []);
+      setForcedToolsets(forced.reasons ?? {});
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
     }
@@ -365,7 +370,7 @@ function EditInner() {
       {tab === 1 && (
         <Card>
           <CardContent>
-            <ToolsetGrid disabledToolsets={disabledToolsets} onChange={setDisabledToolsets} />
+            <ToolsetGrid disabledToolsets={disabledToolsets} onChange={setDisabledToolsets} forcedReasons={forcedToolsets} />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: "block" }}>
               保存后写入 profile 的 config.yaml。
             </Typography>
@@ -700,7 +705,7 @@ function EditInner() {
                   action={
                     <IconButton
                       size="small"
-                      onClick={() => void navigator.clipboard.writeText(revealedKey)}
+                      onClick={() => void copyText(revealedKey)}
                     >
                       <ContentCopyIcon fontSize="small" />
                     </IconButton>

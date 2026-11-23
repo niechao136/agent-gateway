@@ -9,7 +9,9 @@ import Collapse from "@mui/material/Collapse";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import LockIcon from "@mui/icons-material/Lock";
 import { getToolsetCatalog, type ToolsetCatalogItem } from "@/lib/api";
 import { ConfirmDialog } from "@/components/Common";
 
@@ -45,9 +47,12 @@ const PRESETS: { label: string; enabled: string[] }[] = [
 export function ToolsetGrid({
   disabledToolsets,
   onChange,
+  forcedReasons = {},
 }: {
   disabledToolsets: string[];
   onChange: (next: string[]) => void;
+  /** 因绑定资源而强制开启、不允许关闭的工具集 → 原因说明 */
+  forcedReasons?: Record<string, string>;
 }) {
   const [catalog, setCatalog] = useState<ToolsetCatalogItem[]>([]);
   const [source, setSource] = useState<"dashboard" | "static">("static");
@@ -85,14 +90,15 @@ export function ToolsetGrid({
   }
 
   function applyPreset(p: (typeof PRESETS)[number]) {
+    const keepOn = new Set(Object.keys(forcedReasons)); // 强制开启的不受影响
     if (p.enabled.length === 0 && p.label === "全开") {
-      onChange([]); // 空 disabled = 全开
+      onChange([]);
       return;
     }
     const all = catalog.map((c) => c.name);
     onChange(
       all
-        .filter((n) => !p.enabled.includes(n))
+        .filter((n) => !p.enabled.includes(n) && !keepOn.has(n))
         .sort(),
     );
   }
@@ -114,6 +120,16 @@ export function ToolsetGrid({
         ))}
         <Chip size="small" label={`目录来源: ${source}`} variant="outlined" sx={{ ml: "auto" }} />
       </Stack>
+
+      {Object.keys(forcedReasons).length > 0 ? (
+        <Alert severity="info" icon={<LockIcon fontSize="small" />}>
+          以下工具集因 Agent 绑定了相关资源而自动开启且不可关闭：
+          {Object.entries(forcedReasons).map(([name, reason]) => (
+            <div key={name}>· {name}：{reason}</div>
+          ))}
+          解绑相关资源后即可自行关闭。
+        </Alert>
+      ) : null}
 
       <Stack spacing={0.5}>
         {catalog.map((item) => {

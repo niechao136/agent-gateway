@@ -878,6 +878,12 @@ export function setAgentKnowledge(
   });
 }
 
+export async function getForcedToolsets(
+  agentId: number,
+): Promise<{ forced: string[]; reasons: Record<string, string> }> {
+  return request(`/agents/${agentId}/forced-toolsets`);
+}
+
 // ── 定时自动化任务 ────────────────────────────────────────
 export interface ScheduledTask {
   id: number;

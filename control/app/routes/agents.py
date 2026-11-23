@@ -201,9 +201,43 @@ async def update_agent(
         await session.rollback()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
+    # 工具集开关落盘 + 强制工具集（绑定了 A2A/Skill 的自动开启且不可关闭）
+    if body.disabled_toolsets is not None:
+        from ..hermes.toolset_forcing import apply_forced_toolsets, compute_forced
+
+        forced = await compute_forced(agent, session)
+        apply_forced_toolsets(agent, forced)
+
     await session.commit()
     await session.refresh(agent)
     return _to_out(agent, with_status=True)
+
+
+@router.get("/{agent_id}/forced-toolsets")
+async def get_forced_toolsets(
+    agent_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """该 Agent 因绑定资源而强制开启的工具集（前端据此禁用开关并说明原因）。"""
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权查看他人的 Agent")
+    from ..hermes.toolset_forcing import compute_forced
+
+    forced = await compute_forced(agent, session)
+    reasons = {
+        name: reason for name, reason in (
+            ("a2a", "已绑定 A2A 端点") if "a2a" in forced else (),
+            ("skills", "已绑定 Skill") if "skills" in forced else (),
+            ("terminal", "已绑定带脚本的 Skill") if "terminal" in forced else (),
+        ) if name
+    }
+    return {"forced": sorted(forced), "reasons": reasons}
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)

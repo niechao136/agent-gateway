@@ -5,6 +5,7 @@ import { ThemeRegistry, InitColorSchemeScript } from "@/lib/theme";
 export const metadata: Metadata = {
   title: "Agent Gateway",
   description: "多 Agent 管理平台",
+  icons: { icon: "/favicon.svg" },
   viewport: "width=device-width, initial-scale=1, viewport-fit=cover",
 };
 

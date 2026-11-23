@@ -43,48 +43,64 @@ class FeishuRunner(ConnectorRunner):
             return False, f"凭证无效: code={code} {data.get('msg')}"
 
     async def _connect(self) -> None:
-        import lark_oapi as lark
-        from lark_oapi.api.im.v1 import (
-            P2ImMessageReceiveV1,
-            ReplyMessageRequest,
-            ReplyMessageRequestBody,
-        )
-
-        self._lark = lark
-        self._reply_types = (ReplyMessageRequest, ReplyMessageRequestBody)
+        # ⚠️ lark-oapi 的 ws.Client 在 import 时抓取模块级 event loop，并在 start()
+        # 里 loop.run_until_complete()。必须在独立线程中、先 set_event_loop 再 import
+        # 并构造 Client，否则会抓到 uvicorn 正在运行的 loop → "This event loop is
+        # already running" → 线程秒退、WS 从未握手，但状态却显示 connected。
         app_id, app_secret = self._creds()
         self._loop = asyncio.get_running_loop()
 
-        def on_message(data: P2ImMessageReceiveV1) -> None:
-            """SDK 回调（线程内）。转发到事件循环。"""
+        def _run_ws() -> None:
+            import lark_oapi as lark
+            from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
+
+            # 确保 SDK 的模块级 loop 属于本线程
             try:
-                event = data.event
-                msg = event.message
-                chat_id = msg.chat_id
-                msg_type = msg.message_type
-                if msg_type != "text":
-                    return
-                content = json.loads(msg.content or "{}")
-                text = content.get("text", "")
-                user_id = event.sender.sender_id.open_id if event.sender else ""
-                if not text or not chat_id:
-                    return
-                asyncio.run_coroutine_threadsafe(
-                    self.on_message(chat_id, user_id or "unknown", text), self._loop
-                )
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+
+            def on_message(data: P2ImMessageReceiveV1) -> None:
+                """SDK 回调（线程内）。转发到事件循环。"""
+                try:
+                    event = data.event
+                    msg = event.message
+                    chat_id = msg.chat_id
+                    if msg.message_type != "text":
+                        return
+                    content = json.loads(msg.content or "{}")
+                    text = content.get("text", "")
+                    user_id = event.sender.sender_id.open_id if event.sender else ""
+                    if not text or not chat_id:
+                        return
+                    asyncio.run_coroutine_threadsafe(
+                        self.on_message(chat_id, user_id or "unknown", text), self._loop
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("飞书消息解析失败: %s", exc)
+
+            # ⚠️ event_handler 必须是 EventDispatcherHandler，普通函数会在 SDK
+            # 分发时因缺少 _do_without_validation 抛 AttributeError 而被静默吞掉。
+            handler = (
+                lark.EventDispatcherHandler.builder("", "")
+                .register_p2_im_message_receive_v1(on_message)
+                .build()
+            )
+            client = lark.ws.Client(
+                app_id,
+                app_secret,
+                event_handler=handler,
+                log_level=lark.LogLevel.INFO,
+            )
+            self._ws_client = client
+            logger.info("飞书 WS 客户端启动（connector=%s）", self.connector.id)
+            try:
+                client.start()
             except Exception as exc:  # noqa: BLE001
-                logger.exception("飞书消息解析失败: %s", exc)
+                logger.exception("飞书 WS 运行异常（connector=%s）：%s", self.connector.id, exc)
 
-        self._ws_client = lark.ws.Client(
-            app_id,
-            app_secret,
-            event_handler=on_message,
-            log_level=lark.LogLevel.WARNING,
-        )
-
-        # SDK 的 start 是阻塞的 → 独立线程
         self._thread = threading.Thread(
-            target=self._ws_client.start,
+            target=_run_ws,
             name=f"feishu-ws-{self.connector.id}",
             daemon=True,
         )
@@ -102,9 +118,6 @@ class FeishuRunner(ConnectorRunner):
 
         def _do_send():
             client = lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
-            req = self._reply_types[0](
-                message_id="",  # reply 需要原消息 id；此处用 chat 发送代替
-            )
             # 用 create 接口按 chat_id 发送（无需原消息 id）
             from lark_oapi.api.im.v1 import (
                 CreateMessageRequest,

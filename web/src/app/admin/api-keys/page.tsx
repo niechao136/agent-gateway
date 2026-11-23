@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import { useCallback, useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -156,7 +157,7 @@ function ApiKeysInner() {
                 action={
                   <IconButton
                     size="small"
-                    onClick={() => void navigator.clipboard.writeText(revealed)}
+                    onClick={() => void copyText(revealed)}
                   >
                     <ContentCopyIcon fontSize="small" />
                   </IconButton>
