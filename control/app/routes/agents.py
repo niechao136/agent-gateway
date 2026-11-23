@@ -230,13 +230,12 @@ async def get_forced_toolsets(
     from ..hermes.toolset_forcing import compute_forced
 
     forced = await compute_forced(agent, session)
-    reasons = {
-        name: reason for name, reason in (
-            ("a2a", "已绑定 A2A 端点") if "a2a" in forced else (),
-            ("skills", "已绑定 Skill") if "skills" in forced else (),
-            ("terminal", "已绑定带脚本的 Skill") if "terminal" in forced else (),
-        ) if name
+    reason_map = {
+        "a2a": "已绑定 A2A 端点",
+        "skills": "已绑定 Skill",
+        "terminal": "已绑定带脚本的 Skill",
     }
+    reasons = {name: reason_map[name] for name in forced if name in reason_map}
     return {"forced": sorted(forced), "reasons": reasons}
 
 
