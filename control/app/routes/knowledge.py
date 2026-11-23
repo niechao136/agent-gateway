@@ -109,6 +109,11 @@ async def _ragflow_datasets(base_url: str, api_key: str) -> list[DatasetOut]:
     if r.status_code != 200:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"RAGFlow 返回 {r.status_code}: {r.text[:200]}")
     data = r.json()
+    # RAGFlow 业务码在 body 的 code 字段（0=成功）；免费版会返回
+    # {"code":403,"message":"You need to upgrade to a Starter or Pro plan..."} 且 HTTP 仍是 200。
+    if isinstance(data, dict) and data.get("code") not in (None, 0):
+        msg = data.get("message") or "未知错误"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"RAGFlow 业务错误 {data.get('code')}: {msg}")
     rows = data.get("data") if isinstance(data, dict) else data
     if not isinstance(rows, list):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "RAGFlow 数据集响应格式异常")
@@ -146,11 +151,13 @@ async def create_kb(
     ).scalar_one_or_none()
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, "同名知识库已存在")
+    payload = body.model_dump()
+    # is_shared 单独按角色计算，避免重复传参
+    payload["is_shared"] = bool(body.is_shared) and user.role == UserRole.ADMIN
     k = KnowledgeBase(
         owner_id=user.id,
         source="ragflow",
-        **body.model_dump(),
-        is_shared=body.is_shared if user.role == UserRole.ADMIN else False,
+        **payload,
     )
     session.add(k)
     await session.flush()

@@ -82,6 +82,7 @@ export function ToolsetGrid({
   }
 
   function trySet(item: ToolsetCatalogItem, on: boolean) {
+    if (item.name in forcedReasons) return; // 强制开启的工具集不可关闭（后端保障 + UI 同步）
     if (on && DANGEROUS.has(item.name)) {
       setConfirmItem(item); // 高危二次确认
       return;
@@ -147,11 +148,16 @@ export function ToolsetGrid({
               }}
             >
               <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <Switch
-                  size="small"
-                  checked={on}
-                  onChange={(e) => trySet(item, e.target.checked)}
-                />
+                <Tooltip title={item.name in forcedReasons ? forcedReasons[item.name] : ""} placement="top">
+                  <span>
+                    <Switch
+                      size="small"
+                      checked={on}
+                      disabled={item.name in forcedReasons}
+                      onChange={(e) => trySet(item, e.target.checked)}
+                    />
+                  </span>
+                </Tooltip>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {item.name}
                 </Typography>

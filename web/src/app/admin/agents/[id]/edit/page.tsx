@@ -28,6 +28,7 @@ import {
   applyModelTemplate,
   getEffectiveModel,
   getForcedToolsets,
+  getAgentSoul,
   bindAgentSkills,
   createAgentAPIKey,
   createAndBindA2A,
@@ -122,7 +123,7 @@ function EditInner() {
       setName(a.name);
       setDescription(a.description ?? "");
       setDisabledToolsets(a.disabled_toolsets ?? []);
-      const [tpl, eff, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind, forced] = await Promise.all([
+      const [tpl, eff, mcp, bind, ks, skAll, skBind, a2aAllR, a2aBind, bs, kbAll, kbBind, forced, soulData] = await Promise.all([
         listModelTemplates().catch(() => []),
         getEffectiveModel(id).catch(() => ({ profile: "", model: {} })),
         listMCPServers().catch(() => []),
@@ -136,6 +137,7 @@ function EditInner() {
         listKnowledgeBases().catch(() => []),
         getAgentKnowledge(id).catch(() => ({ bound: [] as number[] })),
         getForcedToolsets(id).catch(() => ({ forced: [], reasons: {} })),
+        getAgentSoul(id).catch(() => ({ soul: "" })),
       ]);
       setTemplates(tpl);
       setEffectiveModel(eff.model ?? {});
@@ -153,6 +155,7 @@ function EditInner() {
       setKnowledgeAll(kbAll);
       setKnowledgeBound(kbBind.bound ?? []);
       setForcedToolsets(forced.reasons ?? {});
+      setSoul(soulData.soul ?? "");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "加载失败");
     }

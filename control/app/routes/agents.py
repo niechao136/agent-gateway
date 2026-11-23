@@ -213,6 +213,23 @@ async def update_agent(
     return _to_out(agent, with_status=True)
 
 
+@router.get("/{agent_id}/soul")
+async def get_agent_soul(
+    agent_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """读取该 Agent profile 当前生效的 SOUL.md（编辑页回填用）。"""
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权查看他人的 Agent")
+    return {"soul": prov.read_soul(agent.profile_name)}
+
+
 @router.get("/{agent_id}/forced-toolsets")
 async def get_forced_toolsets(
     agent_id: int,

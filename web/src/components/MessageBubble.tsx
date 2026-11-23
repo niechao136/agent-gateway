@@ -49,8 +49,8 @@ function ToolCallBlock({ message }: { message: ChatMessage }) {
           label={`${running ? "调用中" : "工具"} · ${message.toolName ?? "tool"}`}
           color={running ? "primary" : "default"}
           variant="outlined"
-          onClick={text ? () => setExpanded((v) => !v) : undefined}
-          sx={{ cursor: text ? "pointer" : "default" }}
+          onClick={() => setExpanded((v) => !v)}
+          sx={{ cursor: "pointer" }}
         />
       </StackRow>
       {text && expanded ? (
@@ -75,6 +75,10 @@ function ToolCallBlock({ message }: { message: ChatMessage }) {
       ) : text ? (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
           {preview}
+        </Typography>
+      ) : expanded ? (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5, whiteSpace: "pre-wrap" }}>
+          该工具未返回可展示输出
         </Typography>
       ) : running ? (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>

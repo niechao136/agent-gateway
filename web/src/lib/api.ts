@@ -878,6 +878,10 @@ export function setAgentKnowledge(
   });
 }
 
+export async function getAgentSoul(agentId: number): Promise<{ soul: string }> {
+  return request(`/agents/${agentId}/soul`);
+}
+
 export async function getForcedToolsets(
   agentId: number,
 ): Promise<{ forced: string[]; reasons: Record<string, string> }> {

@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 
+def read_soul(profile: str) -> str:
+    """读取 profile 当前生效的 SOUL.md（编辑页回填用）。"""
+    root = get_settings().hermes_data_root
+    path = Path(root) / "profiles" / profile / "SOUL.md"
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("读取 SOUL.md 失败（%s）：%s", path, exc)
+        return ""
+
+
 def ensure_profile_api_key(profile: str) -> None:
     """为 profile 写入专属 API_SERVER_KEY（multiplex 路由鉴权用）。
 
