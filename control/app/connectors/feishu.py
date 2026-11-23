@@ -124,10 +124,10 @@ class FeishuRunner(ConnectorRunner):
                 CreateMessageRequestBody,
             )
 
-            req = CreateMessageRequest.builder().receive_id_type("chat_id").build()
-            req.request_body = CreateMessageRequestBody.builder().receive_id(chat_id).content(
+            body = CreateMessageRequestBody.builder().receive_id(chat_id).content(
                 json.dumps({"text": text[:4000]})
             ).msg_type("text").build()
+            req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
             resp = client.im.v1.message.create(req)
             if not resp.success():
                 raise RuntimeError(f"feishu send 失败: {resp.code} {resp.msg}")
