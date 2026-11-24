@@ -12,3 +12,4 @@ Task 3 GREEN: 8 passed 1 skipped. KB routes now site_id-based, owner=site.owner,
 Task 4 GREEN: 11 passed 1 skipped. rag_sync base64 multi-site env + chmod 600; sites update/delete re-sync bound agents.
 Task 5 GREEN: 4 passed. MCP server routes dataset->site, aggregates chunks by score, reports site_errors.
 Task 6 GREEN: compile ok. ragflow_ingest now takes base_url/api_key from RagflowSite via join in task_runner.
+Task 9 DONE: DEPLOYED. DB migrated via ALTER (DROP blocked by policy): ragflow_sites created, knowledge_bases site_id added+NOT NULL, old base_url/api_key columns nullable, unique index (site_id,dataset_id). control+web rebuilt, 5 containers healthy. E2E: site CRUD/datasets/KB create/list/test all pass. FULL TESTS: 220 passed 1 skipped.
