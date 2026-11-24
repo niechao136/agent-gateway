@@ -135,7 +135,7 @@ function EditInner() {
         getAgentA2A(id).catch(() => ({ bound: [] as A2AEndpoint[] })),
         listAgentBuiltinSkills(id).catch(() => ({ skills: [] as AgentBuiltinSkill[] })),
         listKnowledgeBases().catch(() => []),
-        getAgentKnowledge(id).catch(() => ({ bound: [] as number[] })),
+        getAgentKnowledge(id).catch(() => [] as KnowledgeBase[]),
         getForcedToolsets(id).catch(() => ({ forced: [], reasons: {} })),
         getAgentSoul(id).catch(() => ({ soul: "" })),
       ]);
@@ -153,7 +153,7 @@ function EditInner() {
       setBuiltinSkills(bs.skills ?? []);
       setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
       setKnowledgeAll(kbAll);
-      setKnowledgeBound(kbBind.bound ?? []);
+      setKnowledgeBound((kbBind ?? []).map((k: { id: number }) => k.id));
       setForcedToolsets(forced.reasons ?? {});
       setSoul(soulData.soul ?? "");
     } catch (e) {
@@ -623,67 +623,43 @@ function EditInner() {
       {tab === 6 && (
         <Card><CardContent><Stack spacing={2}>
           <Typography variant="subtitle1">绑定的知识库（RAGFlow）</Typography>
+          <Typography variant="body2" color="text.secondary">
+            勾选后自动为该 Agent 注入内置 RAGFlow 检索工具（MCP）。
+            同一站点可勾选多个知识库，跨站点也支持；无需开启 terminal 工具集。
+          </Typography>
           {knowledgeAll.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              还没有知识库。请先到「知识库」页登记 RAGFlow 知识库。
+              还没有知识库。请先到「知识库」页配置站点并登记知识库。
             </Typography>
-          ) : knowledgeAll.map((kb) => (
-            <FormControlLabel key={kb.id}
-              control={<Checkbox checked={knowledgeBound.includes(kb.id)} onChange={(e) => {
-                const next = e.target.checked
-                  ? [...knowledgeBound, kb.id]
-                  : knowledgeBound.filter((x) => x !== kb.id);
-                void saveKnowledge(next);
-              }} />}
-              label={<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <ListItemText primary={kb.name} secondary={kb.dataset_name ?? kb.description ?? ""} />
-                {kb.is_shared ? <Chip size="small" label="共享" /> : null}
-              </Stack>} />))
-          }
-          <Typography variant="caption" color="text.secondary">
-            绑定后控制层会向该 Agent 的 profile 注入「knowledge_search」检索 Skill，Agent 即可基于知识库作答。
-          </Typography>
+          ) : (() => {
+            const bySite = new Map<string, typeof knowledgeAll>();
+            knowledgeAll.forEach((kb) => {
+              const key = kb.site_name || `站点 ${kb.site_id}`;
+              if (!bySite.has(key)) bySite.set(key, []);
+              bySite.get(key)!.push(kb);
+            });
+            return Array.from(bySite.entries()).map(([siteName, kbs]) => (
+              <Box key={siteName}>
+                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>{siteName}</Typography>
+                <Stack spacing={0.5}>
+                  {kbs.map((kb) => (
+                    <FormControlLabel key={kb.id}
+                      control={<Checkbox checked={knowledgeBound.includes(kb.id)} onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...knowledgeBound, kb.id]
+                          : knowledgeBound.filter((x) => x !== kb.id);
+                        void saveKnowledge(next);
+                      }} />}
+                      label={<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <ListItemText primary={kb.name} secondary={kb.dataset_name ?? kb.description ?? ""} />
+                        {kb.is_shared ? <Chip size="small" label="共享" /> : null}
+                      </Stack>} />
+                  ))}
+                </Stack>
+              </Box>
+            ));
+          })()}
         </Stack></CardContent></Card>
-      )}
-
-      {tab === 6 && (
-        <Card>
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="subtitle1">知识库（RAGFlow）</Typography>
-              <Typography variant="body2" color="text.secondary">
-                勾选后会自动为该 Agent 生成知识库检索 Skill 并注入 profile。
-                默认全不选；Agent 需要开启 terminal 工具集才能运行检索脚本（编辑页「工具」Tab）。
-              </Typography>
-              {knowledgeAll.length === 0 ? (
-                <Typography color="text.secondary">
-                  还没有知识库。请到「知识库」页登记 RAGFlow 连接后再回来绑定。
-                </Typography>
-              ) : knowledgeAll.map((k) => (
-                <FormControlLabel
-                  key={k.id}
-                  control={
-                    <Checkbox
-                      checked={knowledgeBound.includes(k.id)}
-                      onChange={(e) => void saveKnowledge(
-                        e.target.checked
-                          ? [...knowledgeBound, k.id]
-                          : knowledgeBound.filter((x) => x !== k.id)
-                      )}
-                    />
-                  }
-                  label={
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                      <ListItemText primary={k.name}
-                        secondary={`${k.dataset_name ?? "未选数据集"} · ${k.base_url}`} />
-                      {k.is_shared ? <Chip size="small" label="共享" /> : null}
-                    </Stack>
-                  }
-                />
-              ))}
-            </Stack>
-          </CardContent>
-        </Card>
       )}
 
       {tab === 7 && (
