@@ -77,20 +77,23 @@ def apply_mcp_servers(profile: str, data_root: str, servers: list) -> dict:
         raise MCPSyncError(f"{path} 根节点不是映射，拒绝改写")
 
     entries = [build_mcp_entry(s) for s in servers]
-    # 格式 A: mcp.servers（gateway 对话引擎读取；地图的 streamable_http 走这里）
-    if entries:
-        section = cfg.get("mcp")
-        if not isinstance(section, dict):
-            section = {}
-        section["servers"] = entries
-        cfg["mcp"] = section
-    else:
-        if isinstance(cfg.get("mcp"), dict):
-            cfg["mcp"].pop("servers", None)
-            if not cfg["mcp"]:
-                cfg.pop("mcp", None)
     # 格式 B: mcp_servers 字典（CLI mcp list / enabled / env）；合并保留其他来源条目
     ms = dict(cfg.get("mcp_servers") or {})
+    # 把旧格式 mcp.servers 条目迁移到 mcp_servers，统一为 Hermes 标准格式
+    old_mcp = cfg.get("mcp")
+    if isinstance(old_mcp, dict) and isinstance(old_mcp.get("servers"), list):
+        for srv in old_mcp["servers"]:
+            if not isinstance(srv, dict):
+                continue
+            name = srv.get("name")
+            if not name:
+                continue
+            item = {k: v for k, v in srv.items() if k != "name"}
+            item.setdefault("enabled", True)
+            ms.setdefault(name, item)
+        old_mcp.pop("servers", None)
+        if not old_mcp:
+            cfg.pop("mcp", None)
     managed_names = {e["name"] for e in entries}
     for name in list(ms.keys()):
         if name in managed_names:

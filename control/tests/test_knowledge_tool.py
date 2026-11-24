@@ -65,8 +65,8 @@ def test_apply_knowledge_tool_writes_env_and_mcp(tmp_path):
     import yaml
 
     data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
-    assert any(s.get("name") == "existing" for s in data["mcp"]["servers"])  # 合并而非覆盖
-    assert any(s.get("name") == "ragflow-retrieve" for s in data["mcp"]["servers"])
+    assert "existing" in data["mcp_servers"]  # 旧格式迁移保留
+    assert "ragflow-retrieve" in data["mcp_servers"]
 
     remove_knowledge_tool(profile)
     env2 = (cfg.parent / ".env").read_text(encoding="utf-8")

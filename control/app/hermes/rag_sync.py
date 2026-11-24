@@ -90,21 +90,25 @@ def _sync_mcp_entry(profile: str, *, enabled: bool) -> dict:
             "env": env,
             "description": "RAGFlow 知识库检索（dataset_ids 数组）",
         }
+    # 把旧格式 mcp.servers 条目迁移到 mcp_servers，统一为 Hermes 标准格式
+    old_mcp = cfg.get("mcp")
+    if isinstance(old_mcp, dict) and isinstance(old_mcp.get("servers"), list):
+        for srv in old_mcp["servers"]:
+            if not isinstance(srv, dict):
+                continue
+            name = srv.get("name")
+            if not name:
+                continue
+            item = {k: v for k, v in srv.items() if k != "name"}
+            item.setdefault("enabled", True)
+            ms.setdefault(name, item)
+        old_mcp.pop("servers", None)
+        if not old_mcp:
+            cfg.pop("mcp", None)
     if ms:
         cfg["mcp_servers"] = ms
     else:
         cfg.pop("mcp_servers", None)
-    # 同时写旧格式 mcp.servers（gateway 对话引擎读取），与 mcp_servers 并列
-    section = cfg.get("mcp")
-    if not isinstance(section, dict):
-        section = {}
-    servers = [x for x in (section.get("servers") or []) if not (isinstance(x, dict) and x.get("name") == MCP_NAME)]
-    if enabled:
-        servers.append({"name": MCP_NAME, "transport": "stdio", "command": "python3",
-                        "args": [SERVER_SCRIPT], "description": "RAGFlow 知识库检索（dataset_ids 数组）"})
-    if servers:
-        section["servers"] = servers
-        cfg["mcp"] = section
     _atomic_write(path, yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     return {"path": str(path), "mcp": MCP_NAME if enabled else None}
 
