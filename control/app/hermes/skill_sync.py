@@ -93,10 +93,13 @@ def _inject_requires_terminal(skill_md: str) -> str:
 
 def _skill_md(skill, *, strip_scripts: bool) -> str:
     desc = (skill.description or "").replace('"', "'")
-    # 不再注入重复的 hermermes frontmatter：toolset_forcing 会在绑定带脚本
-    # 的 skill 时强制开启 terminal 并禁止关闭，脚本始终可用；注入
-    # requires_toolsets 会让 Hermes 隐藏技能且产生两个 --- frontmatter 块。
-    return f"---\nname: {skill.name}\ndescription: \"{desc}\"\n---\n\n{skill.content}\n"
+    content = skill.content or ""
+    # 剥离 content 自带的 frontmatter（源 SKILL.md 上传时包含），避免双层 --- 块
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            content = parts[2].lstrip("\n")
+    return f"---\nname: {skill.name}\ndescription: \"{desc}\"\n---\n\n{content}\n"
 
 
 def _safe_rel_path(fname: str) -> Path | None:
