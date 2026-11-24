@@ -72,7 +72,7 @@ async def test_skill_files_keep_subdirs_and_block_traversal(monkeypatch, client,
 
 
 async def test_scripts_stripped_when_terminal_disabled(monkeypatch, client, tmp_path):
-    """禁用 terminal 的 Agent：脚本按兜底逻辑保留（terminal 由 toolset_forcing 强制开启）。"""
+    """terminal 被禁用时剥离 scripts/（兜底）；正常绑定时 toolset_forcing 会先开启 terminal。"""
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "hermes_data_root", str(tmp_path))
@@ -87,10 +87,10 @@ async def test_scripts_stripped_when_terminal_disabled(monkeypatch, client, tmp_
     from app.hermes.skill_sync import profile_skills_dir
 
     base = profile_skills_dir("agent-u1-noterm", str(tmp_path)) / "deploy-helper"
-    # 绑定带脚本 skill 时 toolset_forcing 会强制开启 terminal，脚本必须保留
-    assert (base / "scripts" / "run.sh").is_file(), "脚本应保留（terminal 被强制开启）"
+    # terminal 真被禁用时剥离脚本（避免技能引用不存在的文件）
+    assert not (base / "scripts" / "run.sh").exists(), "禁用 terminal 时应剥离脚本"
     skill_md = (base / "SKILL.md").read_text(encoding="utf-8")
-    # 不注入 requires_toolsets：会让 Hermes 隐藏技能（天气 skill 曾因此失效）
+    # 不再注入 requires_toolsets（会让 Hermes 隐藏技能，天气 skill 曾因此失效）
     assert "requires_toolsets" not in skill_md
     assert skill_md.count("---") == 2, "只应有一个 frontmatter 块"
     # 其他目录保留
