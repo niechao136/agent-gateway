@@ -77,6 +77,7 @@ def apply_mcp_servers(profile: str, data_root: str, servers: list) -> dict:
         raise MCPSyncError(f"{path} 根节点不是映射，拒绝改写")
 
     entries = [build_mcp_entry(s) for s in servers]
+    # 格式 A: mcp.servers（gateway 对话引擎读取；地图的 streamable_http 走这里）
     if entries:
         section = cfg.get("mcp")
         if not isinstance(section, dict):
@@ -88,6 +89,21 @@ def apply_mcp_servers(profile: str, data_root: str, servers: list) -> dict:
             cfg["mcp"].pop("servers", None)
             if not cfg["mcp"]:
                 cfg.pop("mcp", None)
+    # 格式 B: mcp_servers 字典（CLI mcp list / enabled / env）；合并保留其他来源条目
+    ms = dict(cfg.get("mcp_servers") or {})
+    managed_names = {e["name"] for e in entries}
+    for name in list(ms.keys()):
+        if name in managed_names:
+            ms.pop(name, None)
+    for e in entries:
+        item = dict(e)
+        name = item.pop("name")
+        item["enabled"] = True
+        ms[name] = item
+    if ms:
+        cfg["mcp_servers"] = ms
+    else:
+        cfg.pop("mcp_servers", None)
 
     _atomic_write(path, yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     logger.info("已写入 %s：%d 个 MCP 服务器", path, len(entries))
@@ -100,6 +116,9 @@ def read_mcp_section(profile: str, data_root: str) -> list:
     if not path.is_file():
         return []
     cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    real = cfg.get("mcp_servers")
+    if isinstance(real, dict):
+        return [{"name": name, **item} for name, item in real.items() if isinstance(item, dict)]
     mcp = cfg.get("mcp")
     if not isinstance(mcp, dict):
         return []

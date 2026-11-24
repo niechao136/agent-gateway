@@ -142,6 +142,7 @@ async def translate_stream(
     emitted_any_token = False
     saw_terminal = False
     final_content = ""
+    pending_tools: list[str] = []  # 已 started 但 output 待 run.completed 回填的工具名
 
     try:
         async for chunk in raw_chunks:
@@ -179,6 +180,11 @@ async def translate_stream(
                     if te:
                         name, output = te
                         if output is None:
+                            pending_tools.append(name)
+                            yield sse("tool_start", {"name": name})
+                        elif output == "":
+                            # tool.completed/failed 不带 output：保持 running，等 run.completed 回填
+                            pending_tools.append(name)
                             yield sse("tool_start", {"name": name})
                         else:
                             yield sse("tool_end", {"name": name, "output": output})
@@ -194,6 +200,15 @@ async def translate_stream(
                 # ── 终态 ──
                 if ev in ("assistant.completed", "run.completed", "run.failed"):
                     saw_terminal = True
+                    if ev == "run.completed":
+                        tool_outputs = [
+                            str(m.get("content", "")) for m in (obj.get("messages") or [])
+                            if isinstance(m, dict) and m.get("role") == "tool" and m.get("content")
+                        ]
+                        for i, tname in enumerate(pending_tools):
+                            out = tool_outputs[i] if i < len(tool_outputs) else ""
+                            yield sse("tool_end", {"name": tname, "output": out[:2000]})
+                        pending_tools.clear()
                     content = obj.get("content")
                     if isinstance(content, str) and content:
                         final_content = content

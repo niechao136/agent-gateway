@@ -33,8 +33,9 @@ def test_apply_multisite_env_and_mcp(profile_dir):
     assert dsmap == {"d1": "1", "d2": "2"}
     import yaml
     cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8"))
-    names = [s["name"] for s in cfg["mcp"]["servers"]]
-    assert "ragflow-retrieve" in names
+    assert "ragflow-retrieve" in cfg["mcp_servers"]
+    assert cfg["mcp_servers"]["ragflow-retrieve"]["enabled"] is True
+    assert "RAGFLOW_SITES_B64" in cfg["mcp_servers"]["ragflow-retrieve"]["env"]
     assert res["env"]["vars"] == 2
 
 
@@ -50,7 +51,7 @@ def test_server_script_copied_to_shared_root(profile_dir):
                          dataset_sites={"d1": "1"})
     import yaml
     cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8"))
-    srv = [s for s in cfg["mcp"]["servers"] if s["name"] == "ragflow-retrieve"][0]
+    srv = cfg["mcp_servers"]["ragflow-retrieve"]
     assert srv["args"] == ["/opt/data/ragflow_mcp_server.py"]
     # 脚本被复制到 hermes 可见的共享根（测试里 monkeypatch 到 tmp_path）
     assert (profile_dir.parent.parent / "ragflow_mcp_server.py").is_file()

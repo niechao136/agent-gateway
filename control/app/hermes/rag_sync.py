@@ -70,27 +70,41 @@ def _sync_mcp_entry(profile: str, *, enabled: bool) -> dict:
     cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(cfg, dict):
         raise RagSyncError(f"{path} 根节点不是映射，拒绝改写")
+    ms = cfg.get("mcp_servers")
+    if not isinstance(ms, dict):
+        ms = {}
+    ms.pop(MCP_NAME, None)
+    if enabled:
+        env = {}
+        env_path = profile_config_path(profile, get_settings().hermes_data_root).parent / ".env"
+        if env_path.is_file():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("RAGFLOW_"):
+                    k, _, v = line.partition("=")
+                    env[k.strip()] = v.strip()
+        ms[MCP_NAME] = {
+            "command": "python3",
+            "args": [SERVER_SCRIPT],
+            "transport": "stdio",
+            "enabled": True,
+            "env": env,
+            "description": "RAGFlow 知识库检索（dataset_ids 数组）",
+        }
+    if ms:
+        cfg["mcp_servers"] = ms
+    else:
+        cfg.pop("mcp_servers", None)
+    # 同时写旧格式 mcp.servers（gateway 对话引擎读取），与 mcp_servers 并列
     section = cfg.get("mcp")
     if not isinstance(section, dict):
         section = {}
-    servers = section.get("servers")
-    servers = list(servers) if isinstance(servers, list) else []
-    servers = [s for s in servers if not (isinstance(s, dict) and s.get("name") == MCP_NAME)]
+    servers = [x for x in (section.get("servers") or []) if not (isinstance(x, dict) and x.get("name") == MCP_NAME)]
     if enabled:
-        servers.append({
-            "name": MCP_NAME,
-            "transport": "stdio",
-            "command": "python3",
-            "args": [SERVER_SCRIPT],
-            "description": "RAGFlow 知识库检索（dataset_ids 数组）",
-        })
+        servers.append({"name": MCP_NAME, "transport": "stdio", "command": "python3",
+                        "args": [SERVER_SCRIPT], "description": "RAGFlow 知识库检索（dataset_ids 数组）"})
     if servers:
         section["servers"] = servers
         cfg["mcp"] = section
-    else:
-        section.pop("servers", None)
-        if not section:
-            cfg.pop("mcp", None)
     _atomic_write(path, yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     return {"path": str(path), "mcp": MCP_NAME if enabled else None}
 
