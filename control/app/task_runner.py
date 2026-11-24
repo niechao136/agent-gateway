@@ -154,9 +154,19 @@ async def _deliver(
                 ).scalar_one_or_none()
                 if kb is not None:
                     from .hermes import ragflow_ingest
+                    from .models import RagflowSite
 
-                    await ragflow_ingest.ingest_text(kb, f"{task.name}\n{result}")
-                    done.append("knowledge")
+                    site = (
+                        await session.execute(
+                            select(RagflowSite).where(RagflowSite.id == kb.site_id)
+                        )
+                    ).scalar_one_or_none()
+                    if site is not None:
+                        await ragflow_ingest.ingest_text(
+                            kb, f"{task.name}\n{result}",
+                            base_url=site.base_url, api_key=site.api_key,
+                        )
+                        done.append("knowledge")
             elif ch == "session":
                 # 会话由 agent_message 动作天然产生；a2a_call 则记录到 run 摘要
                 done.append("session")
