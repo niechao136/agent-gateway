@@ -26,6 +26,7 @@ from .routes import (
     chat,
     connectors as connector_routes,
     knowledge as knowledge_routes,
+    ragflow_sites as ragflow_site_routes,
     mcp as mcp_routes,
     models as model_routes,
     skills as skill_routes,
@@ -113,6 +114,7 @@ app.include_router(agents.router)          # /api/agents
 app.include_router(agents.chat_router)     # /api/chat/agents
 app.include_router(mcp_routes.router)      # /api/mcp
 app.include_router(mcp_routes.agent_router)  # /api/agents/{id}/mcp
+app.include_router(ragflow_site_routes.router)  # /api/knowledge/sites
 app.include_router(knowledge_routes.router)      # /api/knowledge
 app.include_router(knowledge_routes.agent_router)  # /api/agents/{id}/knowledge
 app.include_router(task_routes.router)      # /api/tasks 定时任务
