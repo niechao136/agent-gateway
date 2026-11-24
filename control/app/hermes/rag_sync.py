@@ -25,8 +25,10 @@ from .a2a import _atomic_write, profile_config_path
 logger = logging.getLogger(__name__)
 
 MCP_NAME = "ragflow-retrieve"
-# control 镜像里脚本的绝对位置（Dockerfile WORKDIR /app）
-SERVER_SCRIPT = "/app/app/hermes/ragflow_mcp_server.py"
+# control 镜像里脚本源位置（Dockerfile WORKDIR /app）
+SERVER_SCRIPT_SRC = "/app/app/hermes/ragflow_mcp_server.py"
+# Hermes 容器内可执行位置：共享挂载 /opt/data（control 在下发时把脚本复制过去）
+SERVER_SCRIPT = "/opt/data/ragflow_mcp_server.py"
 
 
 class RagSyncError(Exception):
@@ -93,10 +95,31 @@ def _sync_mcp_entry(profile: str, *, enabled: bool) -> dict:
     return {"path": str(path), "mcp": MCP_NAME if enabled else None}
 
 
+def _ensure_server_script() -> None:
+    """把 MCP server 脚本复制到 Hermes 容器可见的共享目录（/opt/data）。
+
+    MCP 子进程由 Hermes 启动（stdio），Hermes 容器没有 control 的 /app 目录；
+    /opt/data 是 control 与 hermes 的共享挂载，因此脚本必须放这里。
+    内容一致则不重写，保持幂等。
+    """
+    root = Path(get_settings().hermes_data_root)
+    root.mkdir(parents=True, exist_ok=True)
+    src = Path(SERVER_SCRIPT_SRC)
+    if not src.is_file():
+        raise RagSyncError(f"MCP server 脚本源不存在: {src}")
+    data = src.read_bytes()
+    dst = root / "ragflow_mcp_server.py"
+    if dst.is_file() and dst.read_bytes() == data:
+        return
+    _atomic_write(dst, data.decode("utf-8"))
+
+
 def apply_knowledge_tool(profile: str, *, sites: dict, dataset_sites: dict) -> dict:
     """绑定知识库：写多站点 .env + 合并内置 MCP 项。"""
     env = _write_env(profile, sites=sites, dataset_sites=dataset_sites)
     mcp = _sync_mcp_entry(profile, enabled=bool(dataset_sites))
+    if dataset_sites:
+        _ensure_server_script()
     return {"env": env, "mcp": mcp}
 
 

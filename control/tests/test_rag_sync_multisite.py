@@ -45,6 +45,17 @@ def test_env_file_mode_600(profile_dir):
     assert mode == 0o600
 
 
+def test_server_script_copied_to_shared_root(profile_dir):
+    apply_knowledge_tool("agent-u1-test", sites={"1": {"base_url": "http://a", "api_key": "k"}},
+                         dataset_sites={"d1": "1"})
+    import yaml
+    cfg = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8"))
+    srv = [s for s in cfg["mcp"]["servers"] if s["name"] == "ragflow-retrieve"][0]
+    assert srv["args"] == ["/opt/data/ragflow_mcp_server.py"]
+    # 脚本被复制到 hermes 可见的共享根（测试里 monkeypatch 到 tmp_path）
+    assert (profile_dir.parent.parent / "ragflow_mcp_server.py").is_file()
+
+
 def test_remove_clears_env(profile_dir):
     apply_knowledge_tool("agent-u1-test", sites={"1": {"base_url": "http://a", "api_key": "k"}},
                          dataset_sites={"d1": "1"})
