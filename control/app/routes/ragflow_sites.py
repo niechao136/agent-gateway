@@ -125,14 +125,41 @@ async def update_site(site_id: int, body: SiteUpdate, user: CurrentUser, session
         value = getattr(body, key)
         if value is not None:
             setattr(s, key, value)
+    await session.flush()
+    await _sync_agents_of_site(session, s)
     await session.commit()
     await session.refresh(s)
     return _out(s)
 
 
 async def _sync_agents_of_site(session: AsyncSession, site: RagflowSite) -> list[str]:
-    """占位：Task 4 实现真正下发。此处仅返回空错误列表。"""
-    return []
+    """站点连接信息变更后，重下发所有绑定了该站点下知识库的 Agent。"""
+    from sqlalchemy import select as _select
+    from ..hermes.rag_sync import apply_knowledge_tool, RagSyncError
+
+    errors: list[str] = []
+    kbs = (await session.execute(
+        _select(KnowledgeBase).where(KnowledgeBase.site_id == site.id)
+    )).scalars().all()
+    if not kbs:
+        return errors
+    kb_ids = [k.id for k in kbs]
+    agent_ids = (await session.execute(
+        _select(AgentKnowledgeBase.agent_id).where(AgentKnowledgeBase.kb_id.in_(kb_ids)).distinct()
+    )).scalars().all()
+    from ..models import Agent
+    sites_map = {site.id: site}
+    for aid in agent_ids:
+        agent = (await session.execute(_select(Agent).where(Agent.id == aid))).scalar_one_or_none()
+        if agent is None:
+            continue
+        site_entries = {str(site.id): {"base_url": site.base_url, "api_key": site.api_key}} if site.enabled else {}
+        dataset_sites = {k.dataset_id: str(site.id) for k in kbs if k.enabled and k.dataset_id} if site.enabled else {}
+        try:
+            apply_knowledge_tool(agent.profile_name, sites=site_entries, dataset_sites=dataset_sites)
+        except RagSyncError as exc:
+            errors.append(f"agent {agent.id}: {exc}")
+    return errors
 
 
 @router.delete("/{site_id}", status_code=200)

@@ -49,12 +49,19 @@ def test_apply_knowledge_tool_writes_env_and_mcp(tmp_path):
 
     rag_sync.get_settings = lambda: SimpleNamespace(hermes_data_root=str(tmp_path))
     res = apply_knowledge_tool(
-        profile, base_url="http://rag:9380", api_key="k", dataset_ids=["d1", "d2"]
+        profile,
+        sites={"1": {"base_url": "http://rag:9380", "api_key": "k"}},
+        dataset_sites={"d1": "1", "d2": "1"},
     )
     assert res.get("tool") or res.get("env") or res.get("ok")  # 成功返回
     env = (cfg.parent / ".env").read_text(encoding="utf-8")
-    assert "RAGFLOW_ALLOWED_DATASETS=d1,d2" in env
-    assert "RAGFLOW_API_KEY=k" in env
+    assert "RAGFLOW_SITES_B64=" in env
+    assert "RAGFLOW_DATASET_SITES_B64=" in env
+    from app.hermes.rag_env import decode_sites
+    s_line = [x for x in env.splitlines() if x.startswith("RAGFLOW_SITES_B64=")][0]
+    d_line = [x for x in env.splitlines() if x.startswith("RAGFLOW_DATASET_SITES_B64=")][0]
+    sites, dsmap = decode_sites(s_line.split("=", 1)[1], d_line.split("=", 1)[1])
+    assert sites["1"]["api_key"] == "k" and set(dsmap) == {"d1", "d2"}
     import yaml
 
     data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
@@ -63,4 +70,4 @@ def test_apply_knowledge_tool_writes_env_and_mcp(tmp_path):
 
     remove_knowledge_tool(profile)
     env2 = (cfg.parent / ".env").read_text(encoding="utf-8")
-    assert "RAGFLOW_ALLOWED_DATASETS" not in env2
+    assert "RAGFLOW_SITES_B64" not in env2

@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import yaml
 
 from ..config import get_settings
+from .rag_env import encode_sites
 from .a2a import _atomic_write, profile_config_path
 
 logger = logging.getLogger(__name__)
@@ -40,25 +42,22 @@ def _env_path(profile: str) -> Path:
     return _profile_root(profile) / ".env"
 
 
-def _write_env(profile: str, *, base_url: str, api_key: str, dataset_ids: list[str]) -> dict:
-    """写入/清理 RAGFLOW_* 环境变量（保留其它条目）。"""
+def _write_env(profile: str, *, sites: dict, dataset_sites: dict) -> dict:
+    """写多站点配置到 .env（base64 JSON 单行），权限 600。"""
     path = _env_path(profile)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-
     lines = [ln for ln in existing.splitlines() if not ln.startswith("RAGFLOW_")]
-    if dataset_ids:
-        lines += [
-            f"RAGFLOW_BASE_URL={base_url}",
-            f"RAGFLOW_API_KEY={api_key}",
-            "RAGFLOW_ALLOWED_DATASETS=" + ",".join(dataset_ids),
-        ]
+    if sites and dataset_sites:
+        s_b64, d_b64 = encode_sites(sites, dataset_sites)
+        lines += [f"RAGFLOW_SITES_B64={s_b64}", f"RAGFLOW_DATASET_SITES_B64={d_b64}"]
     text = "\n".join(lines).rstrip() + "\n"
     try:
         _atomic_write(path, text)
+        os.chmod(path, 0o600)
     except OSError as exc:
         raise RagSyncError(f"写入 {path} 失败: {exc}") from exc
-    return {"path": str(path), "vars": 3 if dataset_ids else 0}
+    return {"path": str(path), "vars": 2 if (sites and dataset_sites) else 0}
 
 
 def _sync_mcp_entry(profile: str, *, enabled: bool) -> dict:
@@ -94,21 +93,15 @@ def _sync_mcp_entry(profile: str, *, enabled: bool) -> dict:
     return {"path": str(path), "mcp": MCP_NAME if enabled else None}
 
 
-def apply_knowledge_tool(
-    profile: str,
-    *,
-    base_url: str,
-    api_key: str,
-    dataset_ids: list[str],
-) -> dict:
-    """绑定知识库：写 .env + 合并内置 MCP 项。"""
-    env = _write_env(profile, base_url=base_url, api_key=api_key, dataset_ids=dataset_ids)
-    mcp = _sync_mcp_entry(profile, enabled=bool(dataset_ids))
+def apply_knowledge_tool(profile: str, *, sites: dict, dataset_sites: dict) -> dict:
+    """绑定知识库：写多站点 .env + 合并内置 MCP 项。"""
+    env = _write_env(profile, sites=sites, dataset_sites=dataset_sites)
+    mcp = _sync_mcp_entry(profile, enabled=bool(dataset_sites))
     return {"env": env, "mcp": mcp}
 
 
 def remove_knowledge_tool(profile: str) -> dict:
     """解绑全部知识库：清 .env + 移除内置 MCP 项。"""
-    env = _write_env(profile, base_url="", api_key="", dataset_ids=[])
+    env = _write_env(profile, sites={}, dataset_sites={})
     mcp = _sync_mcp_entry(profile, enabled=False)
     return {"env": env, "mcp": mcp}
