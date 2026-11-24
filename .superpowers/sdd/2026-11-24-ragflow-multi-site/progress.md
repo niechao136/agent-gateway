@@ -11,3 +11,4 @@ Task 2 GREEN: 6 passed 1 skipped. ragflow_sites router registered before knowled
 Task 3 GREEN: 8 passed 1 skipped. KB routes now site_id-based, owner=site.owner, _sync_tool builds multi-site payload (Task 4 will make apply_knowledge_tool accept it).
 Task 4 GREEN: 11 passed 1 skipped. rag_sync base64 multi-site env + chmod 600; sites update/delete re-sync bound agents.
 Task 5 GREEN: 4 passed. MCP server routes dataset->site, aggregates chunks by score, reports site_errors.
+Task 6 GREEN: compile ok. ragflow_ingest now takes base_url/api_key from RagflowSite via join in task_runner.

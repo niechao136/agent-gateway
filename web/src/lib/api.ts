@@ -803,13 +803,27 @@ export async function getMessages(
 }
 
 // ── 知识库（RAGFlow）──────────────────────────────────────
+export interface RagflowSite {
+  id: number;
+  name: string;
+  base_url: string;
+  has_api_key: boolean;
+  is_shared: boolean;
+  enabled: boolean;
+}
+
+export interface RagflowSiteDetail extends RagflowSite {
+  api_key_masked: string;
+}
+
 export interface KnowledgeBase {
   id: number;
   name: string;
   owner_id: number;
+  site_id: number;
+  site_name: string;
   description: string | null;
   source: string;
-  base_url: string;
   has_api_key: boolean;
   dataset_id: string | null;
   dataset_name: string | null;
@@ -828,15 +842,43 @@ export function listKnowledgeBases(): Promise<KnowledgeBase[]> {
 
 export function createKnowledgeBase(body: {
   name: string;
+  site_id: number;
   description?: string;
-  base_url: string;
-  api_key: string;
   dataset_id?: string;
   dataset_name?: string;
   is_shared?: boolean;
   enabled?: boolean;
 }): Promise<KnowledgeBase> {
   return request("/knowledge", { method: "POST", body: JSON.stringify(body) });
+}
+
+// ── RAGFlow 站点 ─────────────────────────────────────────
+export function listRagflowSites(): Promise<RagflowSite[]> {
+  return request("/knowledge/sites");
+}
+export function getRagflowSite(id: number): Promise<RagflowSiteDetail> {
+  return request(`/knowledge/sites/${id}`);
+}
+export function createRagflowSite(body: {
+  name: string;
+  base_url: string;
+  api_key: string;
+  is_shared?: boolean;
+  enabled?: boolean;
+}): Promise<RagflowSite> {
+  return request("/knowledge/sites", { method: "POST", body: JSON.stringify(body) });
+}
+export function updateRagflowSite(id: number, body: Record<string, unknown>): Promise<RagflowSite> {
+  return request(`/knowledge/sites/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+export function deleteRagflowSite(id: number, force = false): Promise<void> {
+  return request(`/knowledge/sites/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+}
+export function testRagflowSite(id: number): Promise<{ ok: boolean; message: string }> {
+  return request(`/knowledge/sites/${id}/test`, { method: "POST" });
+}
+export function listSiteDatasets(id: number): Promise<DatasetItem[]> {
+  return request(`/knowledge/sites/${id}/datasets`);
 }
 
 export function updateKnowledgeBase(
@@ -864,10 +906,7 @@ export function testKnowledgeBase(id: number): Promise<{ ok: boolean; message: s
   return request(`/knowledge/${id}/test`, { method: "POST" });
 }
 
-export function getAgentKnowledge(agentId: number): Promise<{
-  bound: number[];
-  effective: string[];
-}> {
+export function getAgentKnowledge(agentId: number): Promise<KnowledgeBase[]> {
   return request(`/agents/${agentId}/knowledge`);
 }
 
