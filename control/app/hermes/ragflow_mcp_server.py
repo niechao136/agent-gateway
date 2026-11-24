@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -45,55 +46,88 @@ def _send(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def _allowed() -> list[str]:
-    return [x.strip() for x in os.environ.get("RAGFLOW_ALLOWED_DATASETS", "").split(",") if x.strip()]
+def _config() -> tuple[dict, dict]:
+    """解码 profile .env 注入的多站点配置（base64 JSON）。"""
+    def dec(name):
+        raw = os.environ.get(name, "")
+        if not raw:
+            return {}
+        try:
+            return json.loads(base64.b64decode(raw).decode("utf-8"))
+        except Exception:
+            return {}
+    sites = dec("RAGFLOW_SITES_B64")
+    dsmap = dec("RAGFLOW_DATASET_SITES_B64")
+    # 兼容旧 profile（单站点）：无新配置时读旧变量
+    if not sites or not dsmap:
+        base = os.environ.get("RAGFLOW_BASE_URL", "").rstrip("/")
+        key = os.environ.get("RAGFLOW_API_KEY", "")
+        allowed = [x.strip() for x in os.environ.get("RAGFLOW_ALLOWED_DATASETS", "").split(",") if x.strip()]
+        if base and key:
+            sites = {"legacy": {"base_url": base, "api_key": key}}
+            dsmap = {d: "legacy" for d in allowed}
+    return sites, dsmap
 
 
 def _do_retrieve(args: dict) -> dict:
     question = str(args.get("question") or "").strip()
     if not question:
         return {"error": "请提供检索问题 question"}
-    allowed = _allowed()
-    if not allowed:
+    sites, dsmap = _config()
+    if not sites or not dsmap:
         return {"error": "该 Agent 未绑定任何知识库"}
     requested = args.get("dataset_ids") or []
     if not isinstance(requested, list):
         return {"error": "dataset_ids 必须是数组"}
-    ids = [str(x) for x in requested] if requested else allowed
-    ids = [x for x in ids if x in allowed]
+    ids = [str(x) for x in requested] if requested else list(dsmap.keys())
+    ids = [x for x in ids if x in dsmap]
     if not ids:
         return {"error": "指定的知识库不在允许列表中"}
 
-    base = os.environ.get("RAGFLOW_BASE_URL", "").rstrip("/")
-    key = os.environ.get("RAGFLOW_API_KEY", "")
-    if not base or not key:
-        return {"error": "知识库服务未配置完整"}
     top_k = int(args.get("top_k") or 5)
-    body = json.dumps(
-        {"dataset_ids": ids, "question": question, "top_k": top_k}, ensure_ascii=False
-    ).encode()
-    req = urllib.request.Request(
-        base + "/api/v1/retrieval",
-        data=body,
-        method="POST",
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode())
-        chunks = (data.get("data") or {}).get("chunks") or []
-        out = [
-            {
-                "content": c.get("content", ""),
-                "doc": c.get("docnm_kwd", ""),
-                "dataset_id": c.get("dataset_id", ""),
-                "score": c.get("similarity"),
-            }
-            for c in chunks
-        ]
-        return {"chunks": out, "datasets": ids}
-    except Exception as exc:
-        return {"error": str(exc)}
+    by_site: dict[str, list[str]] = {}
+    for ds in ids:
+        by_site.setdefault(dsmap[ds], []).append(ds)
+
+    out: list[dict] = []
+    site_errors: list[str] = []
+    for site_id, ds_ids in by_site.items():
+        cfg = sites.get(site_id)
+        if not cfg:
+            site_errors.append(f"站点 {site_id} 配置缺失")
+            continue
+        body = json.dumps(
+            {"dataset_ids": ds_ids, "question": question, "top_k": top_k}, ensure_ascii=False
+        ).encode()
+        req = urllib.request.Request(
+            cfg["base_url"].rstrip("/") + "/api/v1/retrieval",
+            data=body, method="POST",
+            headers={"Authorization": "Bearer " + cfg["api_key"], "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            if isinstance(data, dict) and data.get("code") not in (None, 0):
+                site_errors.append(f"站点 {site_id}: {data.get('code')} {data.get('message') or ''}")
+                continue
+            chunks = (data.get("data") or {}).get("chunks") or []
+            site_name = cfg.get("name") or site_id
+            for c in chunks:
+                out.append({
+                    "content": c.get("content", ""),
+                    "doc": c.get("docnm_kwd", ""),
+                    "dataset_id": c.get("dataset_id", ""),
+                    "site_name": site_name,
+                    "score": c.get("similarity"),
+                })
+        except Exception as exc:
+            site_errors.append(f"站点 {site_id}: {exc}")
+    out.sort(key=lambda x: (x.get("score") is None, -(x.get("score") or 0)))
+    out = out[:top_k]
+    res = {"chunks": out, "datasets": ids}
+    if site_errors:
+        res["site_errors"] = site_errors
+    return res
 
 
 def main() -> None:
