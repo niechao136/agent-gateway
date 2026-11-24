@@ -179,13 +179,12 @@ async def translate_stream(
                     te = _tool_event(obj, event_name)
                     if te:
                         name, output = te
-                        if output is None:
-                            pending_tools.append(name)
-                            yield sse("tool_start", {"name": name})
-                        elif output == "":
-                            # tool.completed/failed 不带 output：保持 running，等 run.completed 回填
-                            pending_tools.append(name)
-                            yield sse("tool_start", {"name": name})
+                        if output is None or output == "":
+                            # progress / completed 都不带真实输出：去重后保持 running，
+                            # 等 run.completed 的 tool messages 按 tool_name 回填
+                            if name not in pending_tools:
+                                pending_tools.append(name)
+                                yield sse("tool_start", {"name": name})
                         else:
                             yield sse("tool_end", {"name": name, "output": output})
                         continue
@@ -201,14 +200,17 @@ async def translate_stream(
                 if ev in ("assistant.completed", "run.completed", "run.failed"):
                     saw_terminal = True
                     if ev == "run.completed":
-                        tool_outputs = [
-                            str(m.get("content", "")) for m in (obj.get("messages") or [])
-                            if isinstance(m, dict) and m.get("role") == "tool" and m.get("content")
-                        ]
-                        for i, tname in enumerate(pending_tools):
-                            out = tool_outputs[i] if i < len(tool_outputs) else ""
+                        # 按 tool_name 精确匹配（同一工具多次调用用队列消费）
+                        by_name: dict[str, list[str]] = {}
+                        for m in (obj.get("messages") or []):
+                            if isinstance(m, dict) and m.get("role") == "tool" and m.get("content"):
+                                nm = m.get("tool_name") or ""
+                                by_name.setdefault(nm, []).append(str(m["content"]))
+                        for tname in list(pending_tools):
+                            q = by_name.get(tname) or []
+                            out = q.pop(0) if q else ""
+                            pending_tools.remove(tname)
                             yield sse("tool_end", {"name": tname, "output": out[:2000]})
-                        pending_tools.clear()
                     content = obj.get("content")
                     if isinstance(content, str) and content:
                         final_content = content
