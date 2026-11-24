@@ -438,28 +438,47 @@ class Conversation(Base):
 Index("ix_conversations_user_active", Conversation.user_id, Conversation.deleted_at)
 
 
-# ── 知识库（RAGFlow）────────────────────────────────────────
-class KnowledgeBase(Base):
-    """外部知识库连接（当前来源：RAGFlow）。
+# ── 知识库（RAGFlow）：站点 + 库两层 ────────────────────────
+class RagflowSite(Base):
+    """一个 RAGFlow 站点（连接信息）。同站点可挂多个知识库。"""
 
-    - 连接信息 + 选中的数据集存在 DB；接口返回 api_key 脱敏
-    - 绑定到 Agent 后，生成检索 Skill 写入该 Agent 的 profile
-    """
-
-    __tablename__ = "knowledge_bases"
-    __table_args__ = (
-        Index("ix_kb_owner_name", "owner_id", "name", unique=True),
-    )
+    __tablename__ = "ragflow_sites"
+    __table_args__ = (Index("ix_ragflow_site_owner_name", "owner_id", "name", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(64))
-    source: Mapped[str] = mapped_column(String(16), default="ragflow")
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_url: Mapped[str] = mapped_column(String(512))
     api_key: Mapped[str] = mapped_column(String(512))
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class KnowledgeBase(Base):
+    """RAGFlow 站点下的一个知识库（dataset）。
+
+    连接信息在 RagflowSite；owner_id 仅冗余快照，权限以 site.owner_id 为准。
+    绑定到 Agent 后，检索工具写入该 Agent 的 profile。
+    """
+
+    __tablename__ = "knowledge_bases"
+    __table_args__ = (Index("ix_kb_site_dataset", "site_id", "dataset_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(
+        ForeignKey("ragflow_sites.id", ondelete="CASCADE"), index=True
+    )
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(16), default="ragflow")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     dataset_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     dataset_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
