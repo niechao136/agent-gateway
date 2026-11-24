@@ -7,3 +7,4 @@ Task 4 -> Task 5: rag_sync 下发 RAGFLOW_*_B64，MCP server 消费 — 格式(b
 Task 6 -> Task 8: ingest 改 join site，前端 knowledge_id 语义不变 — 一致
 Task 1 Step 1-2: RED verified — ModuleNotFoundError app.hermes.rag_env (expected, feature missing)
 Task 1 GREEN: test_rag_env 3 passed. RagflowSite model added, KnowledgeBase.site_id, rag_env encode/decode.
+Task 2 GREEN: 6 passed 1 skipped. ragflow_sites router registered before knowledge router. Force-delete cascade stub (Task 4 fills sync).
