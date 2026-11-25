@@ -161,6 +161,8 @@ services:
       TUNNEL_ENABLED: ${TUNNEL_ENABLED:-0}
       TUNNEL_HOST: ${TUNNEL_HOST:-ubuntu@43.156.187.79}
       TUNNEL_PORT: ${TUNNEL_PORT:-8899}
+      TUNNEL_UPSTREAM_HOSTS: ${TUNNEL_UPSTREAM_HOSTS:-generativelanguage.googleapis.com}
+      TUNNEL_LOCAL_BASE: ${TUNNEL_LOCAL_BASE:-http://127.0.0.1:8899}
     volumes:
       # hermes 数据目录：读写挂载。
       # - 读：解析实际生效的 API_SERVER_KEY（hermes 会用 .env 覆盖环境变量）

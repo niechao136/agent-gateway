@@ -1,31 +1,45 @@
 #!/bin/sh
-# 自动创建数据目录并统一属主。
-#
-# 由 Makefile 的 up/build 目标在 docker compose 之前自动调用；也可手动运行：
-#   DATA_DIR=/path/to/data DATA_UID=1002 DATA_GID=1003 ./scripts/fix-data-perms.sh
-#
-# 设计目标：本地 / 服务器 / 其他环境用同一套逻辑，消除"目录不存在"和
-# "原子写临时文件 PermissionError"两类问题。
-set -eu
+# 统一数据目录权限。在任何目录调用都能正确解析相对路径（锚定仓库根）。
+# 需 sudo 才能 chown 给容器用户；无 sudo 时只建目录并给出提示。
+set -e
 
-DATA_DIR="${DATA_DIR:-./data}"
-DATA_UID="${DATA_UID:-1000}"
-DATA_GID="${DATA_GID:-1000}"
+# 锚定到仓库根：脚本位于 <root>/scripts/，与 docker-compose.yml 的相对路径基准一致
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+cd "$ROOT"
 
-# 目录不存在时自动创建（hermes 与 postgres 两个子目录）
-mkdir -p "$DATA_DIR/hermes" "$DATA_DIR/postgres"
+# 显式传入的环境变量优先；未设置的才从 .env 的对应键取（只读需要的键，不 source 整个文件）
+env_get() {
+    # $1=key  $2=default
+    eval "cur=\${$1:-}"
+    if [ -n "$cur" ]; then printf '%s' "$cur"; return; fi
+    if [ -f .env ]; then
+        val=$(grep -E "^[[:space:]]*$1[[:space:]]*=" .env 2>/dev/null | tail -1 | sed -e "s/^[^=]*=//" -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//')
+        if [ -n "$val" ]; then printf '%s' "$val"; return; fi
+    fi
+    printf '%s' "$2"
+}
 
-# chown 需要权限。有 sudo 且非 root 时用 sudo；root 直接执行；
-# 都没有（如某些 CI / Windows git-bash 直接跑）则给出明确提示而非静默失败。
-if [ "$(id -u)" -eq 0 ]; then
-    chown -R "${DATA_UID}:${DATA_GID}" "$DATA_DIR"
-elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    sudo chown -R "${DATA_UID}:${DATA_GID}" "$DATA_DIR"
+DATA_DIR=$(env_get DATA_DIR "./data")
+DATA_UID=$(env_get DATA_UID "1000")
+DATA_GID=$(env_get DATA_GID "1000")
+
+# 相对路径按仓库根解析（与 docker compose 的规则一致）
+case "$DATA_DIR" in
+    /*) ABS_DIR="$DATA_DIR" ;;
+    *)  ABS_DIR="$ROOT/${DATA_DIR#./}" ;;
+esac
+
+mkdir -p "$ABS_DIR/hermes" "$ABS_DIR/postgres"
+
+if [ "$(id -u)" = "0" ]; then
+    chown -R "$DATA_UID:$DATA_GID" "$ABS_DIR"
+elif sudo -n true 2>/dev/null; then
+    sudo -n chown -R "$DATA_UID:$DATA_GID" "$ABS_DIR"
 else
     echo "[fix-data-perms] 无法自动 chown（非 root 且无免密 sudo）。" >&2
-    echo "[fix-data-perms] 请手动执行：sudo chown -R ${DATA_UID}:${DATA_GID} ${DATA_DIR}" >&2
+    echo "[fix-data-perms] 请手动执行：sudo chown -R $DATA_UID:$DATA_GID $ABS_DIR" >&2
     echo "[fix-data-perms] 目录已创建，继续启动（若属主不符，control 写 profile 可能报 PermissionError）。" >&2
-    exit 0
 fi
 
-echo "[fix-data-perms] $DATA_DIR 已就绪，属主 ${DATA_UID}:${DATA_GID}"
+echo "[fix-data-perms] 就绪：$ABS_DIR (owner target $DATA_UID:$DATA_GID)"

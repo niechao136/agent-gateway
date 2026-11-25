@@ -199,8 +199,11 @@ async def test_template(
 
     # 规范化：确保 /v1 结尾的 base_url 只加一次 /models
     import httpx
+    from ..hermes.base_url_rewrite import rewrite_base_url
 
-    url = t.base_url.rstrip("/")
+    # 按部署环境重写（隧道环境把 Google 官方地址替换为本地隧道出口），模板数据不动
+    effective_base = rewrite_base_url(t.base_url) or ""
+    url = effective_base.rstrip("/")
     if not url.endswith("/models"):
         url = f"{url}/models"
     headers = {"Authorization": f"Bearer {t.api_key}"} if t.api_key else {}
@@ -252,13 +255,15 @@ async def apply_template(
     if t.owner_id != user.id and not t.is_shared:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "无权使用他人的模板")
 
+    from ..hermes.base_url_rewrite import rewrite_base_url
+
     try:
         res = apply_model(
             agent.profile_name,
             _settings.hermes_data_root,
             model=t.model,
             provider=t.provider,
-            base_url=t.base_url,
+            base_url=rewrite_base_url(t.base_url),
             api_key=t.api_key,
             context_length=t.context_length,
         )

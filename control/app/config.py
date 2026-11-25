@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     # ── 会话软删保留期（SPEC §12.1 决策 4）──
     soft_delete_retention_days: int = 30
 
+    # ── 模型 Base URL 隧道重写（方案 A）──
+    # 模板始终保存逻辑地址（如 Google 官方 URL）；部署环境的特定地址不入库。
+    # TUNNEL_ENABLED=1 且 host 命中 tunnel_upstream_hosts 时，把 scheme://host
+    # 替换为 tunnel_local_base，path/query 原样保留。
+    tunnel_enabled: bool = False
+    tunnel_upstream_hosts: str = "generativelanguage.googleapis.com"  # 逗号分隔
+    tunnel_local_base: str = "http://127.0.0.1:8899"
+
 
 @lru_cache
 def get_settings() -> Settings:

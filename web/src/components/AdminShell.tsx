@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import AppBar from "@mui/material/AppBar";
@@ -35,12 +35,20 @@ import MenuIcon from "@mui/icons-material/Menu";
 import LogoutIcon from "@mui/icons-material/Logout";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import ChatIcon from "@mui/icons-material/Chat";
-import { getRole, getStoredUser, logout } from "@/lib/api";
+import { getHealth, getRole, getStoredUser, logout } from "@/lib/api";
 import { useColorMode } from "@/lib/theme";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import type { Role } from "@/lib/api";
 
 const DRAWER_WIDTH = 240;
+
+function useServiceVersion(): string {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getHealth().then((h) => setVersion(h.version || "")).catch(() => undefined);
+  }, []);
+  return version;
+}
 
 interface NavItem {
   href: string;
@@ -75,6 +83,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const { mode, toggle } = useColorMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const serviceVersion = useServiceVersion();
 
   const role: Role | null = getRole();
   const user = getStoredUser();
@@ -129,6 +138,15 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <ListItemText primary="对话" slotProps={{ primary: { sx: { fontSize: 14 } } }} />
         </ListItemButton>
       </List>
+      {serviceVersion ? (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", px: 2, py: 1.5, textAlign: "center" }}
+        >
+          v{serviceVersion}
+        </Typography>
+      ) : null}
     </Box>
   );
 

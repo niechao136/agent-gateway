@@ -986,3 +986,9 @@ export function runTaskNow(id: number): Promise<{ ok: boolean; summary: string }
 }
 export function listTaskRuns(id: number): Promise<TaskRunInfo[]> { return request(`/tasks/${id}/runs`); }
 
+// 健康检查（公开端点，不含 /api 前缀）——用于页面显示服务版本
+export async function getHealth(): Promise<{ status: string; service: string; version: string }> {
+  const r = await fetch(`/health`, { cache: "no-store" });
+  if (!r.ok) return { status: "unknown", service: "agent-gateway", version: "-" };
+  return r.json();
+}

@@ -24,6 +24,9 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def init_models() -> None:
-    """开发期建表。生产应改用 alembic（见 control/alembic/）。"""
+    """建新表 + 为存量表自动补齐缺失列（幂等，见 app/migrations.py）。"""
+    from .migrations import ensure_columns
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_columns(conn, engine)
