@@ -56,12 +56,11 @@ async def heal_profiles(session: AsyncSession) -> dict:
             apply_forced_toolsets(agent, forced)
             await session.flush()
 
-            terminal_disabled = "terminal" in (agent.disabled_toolsets or [])
             skill_sync.apply_custom_skills(
                 agent.profile_name,
                 data_root,
                 list(bound),
-                terminal_disabled=terminal_disabled,
+                disabled_toolsets=list(agent.disabled_toolsets or []),
             )
             stats["resynced"] += 1
         except Exception as exc:  # 单个 Agent 失败不影响其他
