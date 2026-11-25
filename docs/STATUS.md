@@ -1,6 +1,6 @@
 # STATUS.md — 当前状态（只写现状）
 
-更新：2026-11-24 · 基线提交：`6209594`（master）
+更新：2026-11-25 · 环境配置统一（INTERNET_MODE 两档 / 单一 compose / 固定 Hermes 镜像 / 自动权限脚本）
 
 ## 总体
 
@@ -31,6 +31,14 @@
 - Agent：3（map / weather / person），person 通过 A2A 绑定另外两个，已验证自动调用。
 - RAGFlow：外部自建 `http://139.224.13.57`，3 个数据集（技术 FAQ / 产品手册 / 公司制度）；平台站点/库记录在验证后已清空，待正式配置。
 - 飞书连接器：1 个，WS 已连、收发已验证。
+
+## 部署配置（2026-11-25 统一）
+
+- **单一入口**：`make bootstrap/up/build`（内部自动跑 `scripts/fix-data-perms.sh` 建目录+修权限）。`docker-compose.override.yml` 已删除。
+- **环境差异只靠 `.env`**：`INTERNET_MODE=direct|cn` 自动派生镜像源（官方 / 清华+npmmirror，可用 `PIP_INDEX_URL`/`NPM_REGISTRY` 覆盖）；`DATA_DIR`/`DATA_UID`/`DATA_GID` 统一路径与属主；`*_MEM_LIMIT` 控制内存；`TUNNEL_ENABLED` 控制隧道。
+- **Hermes 镜像固定** `v0.23.2`（= 生产已验证 digest `sha256:d6746a08...`），`HERMES_IMAGE` 可覆盖，不再随 `:latest` 漂移。
+- **`.gitattributes`** 锁定 `*.sh`/`scripts/*`/`*.yml` 为 LF，防 Windows CRLF。
+- 模板：`.env.example`（分组注释，无需迁移脚本）。
 
 ## 已知约束 / 待办
 

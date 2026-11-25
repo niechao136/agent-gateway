@@ -27,24 +27,40 @@
 | ag-postgres | PostgreSQL 16 | 唯一事实来源 |
 | ag-hermes | 单容器 s6（gateway 8642 + dashboard 9119） | Agent 运行时 |
 
-## 快速开始
+## 快速开始（所有环境统一）
+
+所有环境只用一条命令启动，差异全部来自 `.env` 的少数配置项。
 
 ```bash
-# 本地后端测试
-docker build --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-  -t agent-gateway-control:latest ./control
-docker run --rm agent-gateway-control:latest python -m pytest tests/ -q
+# 1. 生成配置
+cp .env.example .env
 
-# 本地前端（Windows；WSL /mnt/d 跑 pnpm 会卡）
-cd web && pnpm test && pnpm exec tsc --noEmit && pnpm build
+# 2. 只改这几项（见 .env.example 分组注释）：
+#    INTERNET_MODE  — direct(外网直连) / cn(国内，自动用清华PyPI+npmmirror)
+#    DATA_DIR       — 数据目录，必须 ext4，绝不能放 /mnt/d
+#    DATA_UID/GID   — 数据目录属主，control 与 hermes 共用
+#    密钥组          — API_SERVER_KEY / JWT_SECRET / POSTGRES_PASSWORD /
+#                     ADMIN_PASSWORD / DASHBOARD_*
+#    GATEWAY_PORT / PUBLIC_BASE_URL
 
-# 生产（srv-01）
-cd /github/agent-gateway
-docker compose --env-file .env --profile full build
-docker compose --env-file .env --profile full up -d --no-build
+# 3. 一键启动（make 会自动建目录、修权限、按网络模式选镜像源）
+make bootstrap        # 首次：build + up
+# 之后：
+make up               # 启动（不重建）
+make build            # 改代码后重建镜像
+make logs             # 跟踪日志
+make test             # 后端测试
 ```
 
-配置、环境变量与详细约定见 [docs/conventions.md](docs/conventions.md)。
+**镜像源自动派生**：`INTERNET_MODE=direct` → 官方源；`cn` → 清华 PyPI + npmmirror。需要覆盖时在 `.env` 里显式设置 `PIP_INDEX_URL` / `NPM_REGISTRY`（用户值优先）。
+
+**隧道**：仅 `cn` 且需要 Gemini 中转时，把 ssh 私钥放到 `${DATA_DIR}/hermes/.ssh_tunnel_key` 即自动启用；`TUNNEL_ENABLED=0` 或无私钥时安全跳过。`direct` 默认关闭。
+
+**Hermes 镜像已固定**为 `v0.23.2`（生产验证版本，digest 见 compose 注释），不会随 `:latest` 漂移；升级改 `HERMES_IMAGE` 一处即可。
+
+> `docker-compose.override.yml` 已删除。原先服务器专用 uid/gid(1002:1003)、内存限制并入主 compose，由 `DATA_UID/GID`、`*_MEM_LIMIT` 控制。
+
+配置、环境变量与详细约定见 [docs/conventions.md](docs/conventions.md)；环境变量逐项说明见 [.env.example](.env.example)。
 
 ## 文档导航
 

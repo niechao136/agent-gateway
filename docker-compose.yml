@@ -9,13 +9,15 @@
 #      反复崩溃重启（实测 RestartCount 持续增长）。
 #   4. 控制层与 hermes 走内网，不对外暴露端口
 #
-# 用法（在 WSL 内执行）：
-#   cd /mnt/d/agent/agent-gateway
-#   docker compose up -d
+# 用法（所有环境统一，差异只在 .env）：
+#   cp .env.example .env    # 按环境改 INTERNET_MODE / DATA_DIR / DATA_UID / DATA_GID
+#   make bootstrap          # 自动建目录 + 修权限 + build + up
+#   make up                 # 后续启动（不重建镜像）
 #
-# 数据目录（ext4，WAL 安全）：
-#   ~/agent-gateway/data/hermes    → /opt/data
-#   ~/agent-gateway/data/postgres  → /var/lib/postgresql/data
+# 环境变量分组见 .env.example；镜像源由 Makefile 按 INTERNET_MODE 派生。
+# 数据目录（ext4，WAL 安全，统一在 ${DATA_DIR} 下）：
+#   ${DATA_DIR}/hermes    → /opt/data
+#   ${DATA_DIR}/postgres  → /var/lib/postgresql/data
 
 name: agent-gateway
 
@@ -27,7 +29,11 @@ services:
   # 不 publish 端口，仅供控制层与 nginx 内网访问
   # ───────────────────────────────────────────────────────────
   hermes:
-    image: nousresearch/hermes-agent:latest
+    # 固定版本 tag：不随 :latest 漂移（避免重新下载与版本不兼容）。
+    # v0.23.2 = 生产已充分验证版本，multi-arch digest
+    #   sha256:d6746a084e9341baada483e3d6210444d3c1aeb7c130f0915150065fb2851459
+    # 升级时改这一个值即可（也可用 HERMES_IMAGE 环境变量覆盖）。
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:v0.23.2}
     container_name: ag-hermes
     restart: unless-stopped
     # ★ 必须显式指定 command。
@@ -36,9 +42,13 @@ services:
     # `gateway run` 才是常驻进程；dashboard 由 s6 在同一容器内监管。
     command: ["gateway", "run"]
     environment:
-      HERMES_UID: ${HERMES_UID:-1000}
-      HERMES_GID: ${HERMES_GID:-1000}
+      HERMES_UID: ${DATA_UID:-1000}
+      HERMES_GID: ${DATA_GID:-1000}
       TZ: ${TZ:-Asia/Shanghai}
+      # 隧道总开关：0=永不使用（direct 环境默认），1=有私钥时才建立
+      TUNNEL_ENABLED: ${TUNNEL_ENABLED:-0}
+      TUNNEL_HOST: ${TUNNEL_HOST:-ubuntu@43.156.187.79}
+      TUNNEL_PORT: ${TUNNEL_PORT:-8899}
 
       # ── OpenAI 兼容 API server（公开聊天走这里）──
       API_SERVER_ENABLED: "true"
@@ -65,10 +75,11 @@ services:
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
       HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${DASHBOARD_SECRET:?DASHBOARD_SECRET is required}
     volumes:
-      # ★ 关键：绝对路径指向 ext4，不能用 /mnt/d
-      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/data
-      # 容器启动时自动建立 Gemini 代理隧道（cont-init 阶段执行，root 权限）
+      # ★ 关键：绝对路径指向 ext4，不能用 /mnt/d。统一由 DATA_DIR 派生。
+      - ${DATA_DIR:-./data}/hermes:/opt/data
+      # 隧道脚本：仅在 cn 环境且存在私钥时生效（脚本内部双重判断）
       - ./scripts/99-tunnel:/etc/cont-init.d/99-tunnel:ro
+    mem_limit: ${HERMES_MEM_LIMIT:-0}
     expose:
       - "8642"
       - "9119"
@@ -100,7 +111,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent_gateway}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - ${POSTGRES_DATA_DIR:-/home/niechao/agent-gateway/data/postgres}:/var/lib/postgresql/data
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+    mem_limit: ${POSTGRES_MEM_LIMIT:-0}
     expose:
       - "5432"
     healthcheck:
@@ -119,8 +131,14 @@ services:
     build:
       context: ./control
       dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    image: agent-gateway-control:latest
     container_name: ag-control
     restart: unless-stopped
+    # 与 hermes 用同一 uid:gid 运行，避免写共享 hermes-data 时 PermissionError
+    user: "${DATA_UID:-1000}:${DATA_GID:-1000}"
+    mem_limit: ${CONTROL_MEM_LIMIT:-0}
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent_gateway}:${POSTGRES_PASSWORD}@ag-postgres:5432/${POSTGRES_DB:-agent_gateway}
       HERMES_DASHBOARD_URL: http://ag-hermes:9119
@@ -143,7 +161,7 @@ services:
       # hermes 数据目录：读写挂载。
       # - 读：解析实际生效的 API_SERVER_KEY（hermes 会用 .env 覆盖环境变量）
       # - 写：A2A 配置需要改 profile 的 config.yaml（原子写 + rename）
-      - ${HERMES_DATA_DIR:-/home/niechao/agent-gateway/data/hermes}:/opt/hermes-data
+      - ${DATA_DIR:-./data}/hermes:/opt/hermes-data
     expose:
       - "8000"
     depends_on:
@@ -163,9 +181,12 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     image: agent-gateway-web:dev
     container_name: ag-web
     restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-0}
     environment:
       # 服务端 rewrite 目标（/api/* → 控制层）
       CONTROL_URL: http://ag-control:8000
@@ -187,6 +208,7 @@ services:
     image: nginx:1.27-alpine
     container_name: ag-nginx
     restart: unless-stopped
+    mem_limit: ${NGINX_MEM_LIMIT:-0}
     ports:
       - "${GATEWAY_PORT:-10099}:80"
     volumes:

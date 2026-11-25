@@ -1,0 +1,12 @@
+# Shell 脚本必须 LF；Windows 上 CRLF 会让容器内 /bin/sh 报
+# "$'\r': command not found"，且 shebang 失效。
+*.sh          text eol=lf
+scripts/*     text eol=lf
+scripts/**    text eol=lf
+99-tunnel     text eol=lf
+
+# 配置文件统一 LF，避免 compose 解析到行尾 \r
+*.yml         text eol=lf
+*.yaml        text eol=lf
+.env.example  text eol=lf
+Dockerfile    text eol=lf

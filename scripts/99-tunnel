@@ -17,6 +17,12 @@ KEY=/opt/data/.ssh_tunnel_key
 HOST="${TUNNEL_HOST:-ubuntu@43.156.187.79}"
 PORT="${TUNNEL_PORT:-8899}"
 
+# 总开关：direct 环境设 TUNNEL_ENABLED=0 时直接跳过，连脚本逻辑都不跑。
+if [ "${TUNNEL_ENABLED:-0}" != "1" ]; then
+    echo "$MARK TUNNEL_ENABLED!=1，跳过（外网直连环境不需要隧道）"
+    exit 0
+fi
+
 if [ ! -f "$KEY" ]; then
     echo "$MARK 未找到 $KEY，跳过（仅当需要 Gemini 中转时才需要）"
     exit 0
