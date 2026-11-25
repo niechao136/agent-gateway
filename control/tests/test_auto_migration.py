@@ -21,7 +21,8 @@ def test_missing_columns_detected_and_added():
             missing = await conn.run_sync(
                 lambda sc: missing_columns_sync(sc, User.__table__)
             )
-            assert "is_active" in missing or "updated_at" in missing or missing == []
+            assert missing, "旧结构应检测出缺失列"
+            assert "disabled" in missing or "email" in missing or "last_login_at" in missing
             changed = await ensure_columns(conn, engine)
             # 再跑一次应幂等
             changed2 = await ensure_columns(conn, engine)

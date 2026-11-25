@@ -12,13 +12,14 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit, urlunsplit
 
-from ..config import get_settings
-
 
 def rewrite_base_url(url: str | None) -> str | None:
     """返回按当前部署环境重写后的 base_url；不需要重写时原样返回。"""
     if not url:
         return url
+    # 函数内 import，便于测试 monkeypatch app.config.get_settings
+    from ..config import get_settings
+
     s = get_settings()
     if not s.tunnel_enabled:
         return url
