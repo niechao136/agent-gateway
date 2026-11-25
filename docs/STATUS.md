@@ -43,6 +43,13 @@
 - **模型 base_url 隧道重写（方案 A）**：模板始终存逻辑地址（如 Google 官方 URL），部署环境差异不入库。`TUNNEL_ENABLED=1` 且 host 命中 `TUNNEL_UPSTREAM_HOSTS` 时，把 `scheme://host` 换成 `TUNNEL_LOCAL_BASE`（path 原样保留）。用于模型测试与 apply-model 两处；生产直连时保持 `TUNNEL_ENABLED=0` 即不重写。
 - **control 侧隧道**：`TUNNEL_ENABLED=1` 且 `/opt/data/.ssh_tunnel_key` 存在时，control 的 entrypoint 先建 `127.0.0.1:8899` 转发再起 uvicorn，使模型"连接测试"也能走隧道（hermes 侧另有自己的隧道）。
 - **`/health` 对外可访问**：nginx 新增 `location = /health` 直连 control，返回 `{status,service,version}`；管理页侧栏底部显示版本号。
+- **Skill 来源隔离**：
+  - "内置 Skill" 列表用排除法（排除平台自定义技能名 + curator 影子技能），兼容上游无 `provenance` 字段的实现。
+  - curator 自动生成的技能归入 Agent 编辑页独立分区，按 Hermes 实际启用状态显示（`GET /api/agents/{id}/skills/curated`）。
+  - 内置 Skill 支持查看详情（`GET /api/agents/{id}/skills/builtin/{name}`，走 Hermes `/api/skills/content`）。
+- **curator 默认关闭**：`CURATOR_ENABLED=false`。Hermes 的 curator 会把成功经验自动沉淀为技能，与平台下发的自定义 Skill 语义重叠（曾产生 `weather-query` 抢走天气问题）。开启后生成的技能可在上述分区查看。
+- **Skill 目录名 ASCII 化**：`skill_slug()` 优先用 DB 持久化 slug，中文名回退为 `skill-<id>`，消除 POSIX locale 下的中文路径风险。
+- **启动自愈**（`SELF_HEAL_ON_START=true`，幂等）：迁移中文目录名为 slug、恢复被误剥离的 `scripts/`、把 curator 影子技能移出 `skills/` 到 `<profile>/.archived-skills/`（留在 skills 下 Hermes 仍会扫描到）。
 
 ## 已知约束 / 待办
 
