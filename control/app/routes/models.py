@@ -29,6 +29,7 @@ class TemplateIn(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     provider: str = Field(default="custom", max_length=64)
     base_url: str | None = Field(default=None, max_length=512)
+    context_length: int = Field(default=64000, ge=1, le=10000000)
     api_key: str | None = Field(default=None, max_length=512)
     description: str | None = None
     is_shared: bool = False
@@ -38,6 +39,7 @@ class TemplateUpdateIn(BaseModel):
     model: str | None = None
     provider: str | None = None
     base_url: str | None = None
+    context_length: int | None = Field(default=None, ge=1, le=10000000)
     api_key: str | None = None
     description: str | None = None
     is_shared: bool | None = None
@@ -50,6 +52,7 @@ class TemplateOut(BaseModel):
     model: str
     provider: str
     base_url: str | None
+    context_length: int
     has_api_key: bool
     description: str | None
     is_shared: bool
@@ -66,6 +69,7 @@ def _out(t: ModelTemplate) -> TemplateOut:
         model=t.model,
         provider=t.provider,
         base_url=t.base_url,
+        context_length=t.context_length,
         has_api_key=bool(t.api_key),
         description=t.description,
         is_shared=t.is_shared,
@@ -106,6 +110,7 @@ async def create_template(
         model=body.model,
         provider=body.provider,
         base_url=body.base_url,
+        context_length=body.context_length,
         api_key=body.api_key,
         description=body.description,
         owner_id=user.id,
@@ -132,7 +137,7 @@ async def update_template(
     if not can_modify(user, t.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "无权修改他人的模板")
 
-    for field in ("model", "provider", "base_url", "api_key", "description"):
+    for field in ("model", "provider", "base_url", "context_length", "api_key", "description"):
         v = getattr(body, field)
         if v is not None:
             setattr(t, field, v)
@@ -255,6 +260,7 @@ async def apply_template(
             provider=t.provider,
             base_url=t.base_url,
             api_key=t.api_key,
+            context_length=t.context_length,
         )
     except A2AError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc

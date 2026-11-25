@@ -157,11 +157,17 @@ services:
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       SOFT_DELETE_RETENTION_DAYS: ${SOFT_DELETE_RETENTION_DAYS:-30}
       TZ: ${TZ:-Asia/Shanghai}
+      # Gemini 隧道（模型连接测试从 control 容器发请求，需与 hermes 一样走隧道）
+      TUNNEL_ENABLED: ${TUNNEL_ENABLED:-0}
+      TUNNEL_HOST: ${TUNNEL_HOST:-ubuntu@43.156.187.79}
+      TUNNEL_PORT: ${TUNNEL_PORT:-8899}
     volumes:
       # hermes 数据目录：读写挂载。
       # - 读：解析实际生效的 API_SERVER_KEY（hermes 会用 .env 覆盖环境变量）
       # - 写：A2A 配置需要改 profile 的 config.yaml（原子写 + rename）
       - ${DATA_DIR:-./data}/hermes:/opt/hermes-data
+      # 隧道私钥（与 hermes 共用同一份；不存在时为空目录，entrypoint 会跳过）
+      - ${DATA_DIR:-./data}/hermes:/opt/data:ro
     expose:
       - "8000"
     depends_on:

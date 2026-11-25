@@ -696,6 +696,7 @@ export interface ModelTemplate {
   model: string;
   provider: string;
   base_url: string | null;
+  context_length: number;
   has_api_key: boolean;
   description: string | null;
   is_shared: boolean;
@@ -711,6 +712,7 @@ export async function createModelTemplate(body: {
   model: string;
   provider?: string;
   base_url?: string;
+  context_length?: number;
   api_key?: string;
   description?: string;
   is_shared?: boolean;
@@ -738,6 +740,7 @@ export async function updateModelTemplate(
     model?: string;
     provider?: string;
     base_url?: string;
+    context_length?: number;
     api_key?: string;
     description?: string;
     is_shared?: boolean;

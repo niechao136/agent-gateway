@@ -114,6 +114,9 @@ class ModelTemplate(Base):
     provider: Mapped[str] = mapped_column(String(64), default="custom")
     model: Mapped[str] = mapped_column(String(128))
     base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Hermes 要求模型上下文 >= 64000（_enforce_minimum_context），小窗口本地模型
+    # 需在此声明覆盖，apply-model 时写入 profile config.yaml 的 model.context_length。
+    context_length: Mapped[int] = mapped_column(Integer, default=64000, server_default="64000")
     # API key 明文存控制层 DB（个人项目可接受；生产应改用引用）
     api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -36,6 +36,7 @@ interface Form {
   model: string;
   provider: string;
   base_url: string;
+  context_length: number;
   api_key: string;
   description: string;
   is_shared: boolean;
@@ -57,6 +58,7 @@ const EMPTY: Form = {
   model: "",
   provider: "custom",
   base_url: "",
+  context_length: 64000,
   api_key: "",
   description: "",
   is_shared: false,
@@ -91,6 +93,7 @@ function ModelsInner() {
           model: form.model.trim() || undefined,
           provider: form.provider.trim() || undefined,
           base_url: form.base_url.trim() || undefined,
+          context_length: form.context_length,
           api_key: form.api_key || undefined, // 留空 = 不更新
           description: form.description.trim() || undefined,
           ...(isAdmin ? { is_shared: form.is_shared } : {}),
@@ -101,6 +104,7 @@ function ModelsInner() {
           model: form.model.trim(),
           provider: form.provider.trim() || undefined,
           base_url: form.base_url.trim() || undefined,
+          context_length: form.context_length,
           api_key: form.api_key || undefined,
           description: form.description.trim() || undefined,
           is_shared: form.is_shared,
@@ -186,6 +190,7 @@ function ModelsInner() {
                         model: t.model,
                         provider: t.provider,
                         base_url: t.base_url ?? "",
+                        context_length: t.context_length ?? 64000,
                         api_key: "",
                         description: t.description ?? "",
                         is_shared: t.is_shared,
@@ -200,10 +205,13 @@ function ModelsInner() {
                   </Button>
                 </Stack>
                 {t.base_url ? (
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                     {t.base_url}
                   </Typography>
                 ) : null}
+                <Typography variant="caption" color="text.secondary">
+                  上下文长度：{t.context_length}
+                </Typography>
               </CardContent>
             </Card>
           ))}
@@ -243,6 +251,13 @@ function ModelsInner() {
               label="Base URL（可选）"
               value={form.base_url}
               onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+            />
+            <TextField
+              label="Context Length（上下文长度）"
+              type="number"
+              value={form.context_length}
+              onChange={(e) => setForm({ ...form, context_length: Number(e.target.value) || 64000 })}
+              helperText="Hermes 要求 >=64000；小窗口本地模型需显式声明（如 64000）"
             />
             <TextField
               label={editing?.has_api_key ? "API Key（已配置，留空不变）" : "API Key"}

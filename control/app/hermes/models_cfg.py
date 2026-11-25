@@ -44,6 +44,7 @@ def apply_model(
     provider: str = "custom",
     base_url: str | None = None,
     api_key: str | None = None,
+    context_length: int = 64000,
 ) -> dict:
     """写入 profile 的 model 段，其他配置段原样保留。"""
     path = profile_config_path(profile, data_root)
@@ -62,6 +63,10 @@ def apply_model(
         section["base_url"] = base_url
     if api_key:
         section["api_key"] = api_key
+    # Hermes 硬性要求 context >= 64000；本地小窗口模型（如 gemma4 报 24576）
+    # 必须显式写入，否则 _enforce_minimum_context 抛 ValueError → 对话"运行失败"。
+    if context_length and context_length > 0:
+        section["context_length"] = int(context_length)
 
     cfg["model"] = section
     text = yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False, default_flow_style=False)
