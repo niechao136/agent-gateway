@@ -90,6 +90,26 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
         except Exception:
             continue
         base = profile_skills_dir(agent.profile_name, data_root)
+
+        # 迁移历史误归档：早期版本把影子技能移到 skills/.archived，
+        # 但 Hermes 仍会扫描到它。这里搬到 skills/ 之外。
+        legacy_arch = base / ".archived"
+        if legacy_arch.is_dir():
+            outside = base.parent / ".archived-skills"
+            outside.mkdir(parents=True, exist_ok=True)
+            import shutil
+
+            for child in list(legacy_arch.iterdir()):
+                tgt = outside / child.name
+                try:
+                    if tgt.exists():
+                        shutil.rmtree(tgt, ignore_errors=True)
+                    child.rename(tgt)
+                    archived += 1
+                except OSError:
+                    pass
+            shutil.rmtree(legacy_arch, ignore_errors=True)
+
         managed_file = base / "_managed_by_gateway"
         managed: set[str] = set()
         if managed_file.is_file():
@@ -114,7 +134,9 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
             src = next((c for c in candidates if c.is_dir()), None)
             if src is None:
                 continue
-            dst_dir = base / ".archived"
+            # 归档目录必须在 skills/ 之外：Hermes 会扫描 skills/ 下所有子目录，
+            # 放在 skills/.archived 里仍然会被当成可用技能。
+            dst_dir = base.parent / ".archived-skills"
             dst_dir.mkdir(parents=True, exist_ok=True)
             dst = dst_dir / src.name
             try:

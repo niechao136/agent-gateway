@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import quote
 
 from .client import DashboardClient, DashboardError
 
@@ -58,9 +59,10 @@ async def read_skill(profile: str, name: str) -> dict:
     if not meta:
         raise SkillError(f"技能不存在: {name}")
 
+    # Hermes dashboard 的技能正文端点：GET /api/skills/content?name=&profile=
     for path in (
-        f"/api/skills/{name}?profile={profile}",
-        f"/api/skills/detail?name={name}&profile={profile}",
+        f"/api/skills/content?name={quote(name)}&profile={profile}",
+        f"/api/skills/{quote(name)}?profile={profile}",
     ):
         try:
             async with DashboardClient() as client:
@@ -71,6 +73,8 @@ async def read_skill(profile: str, name: str) -> dict:
             content = data.get("content") or data.get("body") or data.get("skill_md")
             if content:
                 meta["content"] = content
+                if data.get("path"):
+                    meta["path"] = data["path"]
                 break
     meta.setdefault("content", "")
     return meta
