@@ -379,15 +379,27 @@ async def list_agent_builtin_skills(
     except SkillError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
+    # 平台管理的自定义技能名：这些有自己的管理页，不算"内置"。
+    managed_names = set(
+        (await session.execute(select(CustomSkill.name))).scalars().all()
+    )
+
     items = []
     for s in available:
         name = s.get("name") or ""
         if not name:
             continue
         # 只列 Hermes 自带的内置技能。provenance 取值：
-        #   bundled = 内置；agent = Agent/curator 运行时沉淀；custom = 平台下发的自定义技能
-        # 自定义技能有自己的管理页，curator 技能归入自定义区，均不应混入"内置 Skill"。
-        if (s.get("provenance") or "") != "bundled":
+        # 排除"非内置"的两类：
+        #   1) 平台下发的自定义 Skill（有自己的管理页，且已绑定时按名称排除）
+        #   2) curator 运行时自动沉淀的影子技能（归入"自定义"区）
+        # 判定用 provenance 优先；若上游未提供该字段（旧版本/精简实现），
+        # 退化为"不在平台自定义技能表里即视为内置"，避免把真正的内置技能过滤掉。
+        prov = s.get("provenance")
+        if prov is not None:
+            if prov != "bundled":
+                continue
+        elif name in managed_names:
             continue
         items.append(
             {
