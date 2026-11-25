@@ -44,7 +44,7 @@ cp .env.example .env
 #    GATEWAY_PORT / PUBLIC_BASE_URL
 
 # 3. 一键启动（make 会自动建目录、修权限、按网络模式选镜像源）
-make bootstrap        # 首次：build + up
+make bootstrap        # 首次：build + up（无 make 的环境用：sh scripts/bootstrap.sh）
 # 之后：
 make up               # 启动（不重建）
 make build            # 改代码后重建镜像

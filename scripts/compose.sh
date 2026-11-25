@@ -52,6 +52,12 @@ esac
 
 export PIP_INDEX_URL NPM_REGISTRY TUNNEL_ENABLED
 
-echo "[compose] INTERNET_MODE=${INTERNET_MODE} PIP=${PIP_INDEX_URL} NPM=${NPM_REGISTRY} TUNNEL=${TUNNEL_ENABLED}"
+# 走 SOCKS/HTTP 代理的环境（测试机即此类）：BuildKit 的 remote metadata 拉取
+# 不读 daemon 代理，会 connection reset；legacy builder 走 daemon 代理，稳定。
+# 可用 DOCKER_BUILDKIT=1 显式覆盖。
+[ -n "${DOCKER_BUILDKIT:-}" ] || DOCKER_BUILDKIT=0
+export DOCKER_BUILDKIT
+
+echo "[compose] INTERNET_MODE=${INTERNET_MODE} PIP=${PIP_INDEX_URL} NPM=${NPM_REGISTRY} TUNNEL=${TUNNEL_ENABLED} BUILDKIT=${DOCKER_BUILDKIT}"
 
 exec docker compose --env-file .env --profile full "$@"
