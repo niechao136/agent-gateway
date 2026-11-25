@@ -10,17 +10,10 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-# 同时装 dev 依赖，使镜像可直接跑测试（个人项目，不必拆分镜像）
-RUN pip install --upgrade pip && \
-    python - <<'PY'
-import tomllib, subprocess, sys
-with open('pyproject.toml','rb') as f:
-    proj = tomllib.load(f)
-deps = list(proj['project']['dependencies'])
-deps += list(proj['project'].get('optional-dependencies', {}).get('dev', []))
-subprocess.check_call([sys.executable, '-m', 'pip', 'install', *deps])
-PY
+# requirements.txt 与 pyproject.toml 保持同步（含 runtime + dev）。
+# 用文件而非 heredoc：legacy builder（代理环境必需）不支持 RUN <<'PY'。
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY app ./app
 COPY tests ./tests
