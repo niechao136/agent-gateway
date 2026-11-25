@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     tunnel_upstream_hosts: str = "generativelanguage.googleapis.com"  # 逗号分隔
     tunnel_local_base: str = "http://127.0.0.1:8899"
 
+    # ── Hermes 技能策展器（curator）──
+    # Hermes 的 curator 会在后台把"成功解决过的问题"自动沉淀成技能。
+    # 副作用：会生成与平台下发的自定义 Skill 语义重叠的"影子技能"
+    # （如 weather-query 与自定义的天气查询冲突），导致模型选错技能。
+    # 默认关闭；需要自动学习时设 CURATOR_ENABLED=true。
+    curator_enabled: bool = False
+
+    # 启动时对存量 profile 做技能自愈（目录名迁移/脚本恢复/影子技能归档）。
+    # 幂等：无问题时不做任何写入。设为 false 可关闭。
+    self_heal_on_start: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

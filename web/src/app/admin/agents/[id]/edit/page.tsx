@@ -39,6 +39,8 @@ import {
   getAgentMCP,
   listA2AEndpoints,
   listAgentAPIKeys,
+  getAgentBuiltinSkillDetail,
+  listAgentCuratedSkills,
   listAgentBuiltinSkills,
   listAgentSkillBindings,
   listMCPServers,
@@ -64,6 +66,11 @@ import {
 import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
 import { ConfirmDialog, SkeletonList } from "@/components/Common";
+import InfoIcon from "@mui/icons-material/Info";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
 import { ToolsetGrid } from "@/components/ToolsetGrid";
 
 function EditInner() {
@@ -100,6 +107,14 @@ function EditInner() {
   const [skillBound, setSkillBound] = useState<number[]>([]);
   const [builtinSkills, setBuiltinSkills] = useState<AgentBuiltinSkill[]>([]);
   const [builtinSelected, setBuiltinSelected] = useState<string[]>([]);
+  const [curated, setCurated] = useState<
+    { name: string; description?: string | null; enabled: boolean; usage?: number }[]
+  >([]);
+  const [curatorOn, setCuratorOn] = useState(false);
+  const [skillDetail, setSkillDetail] = useState<{
+    name: string;
+    content: string;
+  } | null>(null);
 
   // A2A 绑定
   const [a2aAll, setA2aAll] = useState<A2AEndpoint[]>([]);
@@ -151,6 +166,9 @@ function EditInner() {
       const visibleIds = new Set(a2aVisible.map((ep) => ep.id));
       setA2aBound((a2aBind.bound ?? []).map((e) => e.id).filter((eid) => visibleIds.has(eid)));
       setBuiltinSkills(bs.skills ?? []);
+      const cur = await listAgentCuratedSkills(id).catch(() => null);
+      setCurated(cur?.skills ?? []);
+      setCuratorOn(Boolean(cur?.curator_enabled));
       setBuiltinSelected((bs.skills ?? []).filter((s) => s.selected).map((s) => s.name));
       setKnowledgeAll(kbAll);
       setKnowledgeBound((kbBind ?? []).map((k: { id: number }) => k.id));
@@ -519,9 +537,83 @@ function EditInner() {
                         />
                       }
                       label={
-                        <ListItemText primary={bs.name} secondary={bs.description ?? ""} />
+                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                          <ListItemText
+                            primary={bs.name}
+                            secondary={bs.description ?? ""}
+                            sx={{ flexGrow: 1 }}
+                          />
+                          <IconButton
+                            size="small"
+                            onClick={async () => {
+                              const d = await getAgentBuiltinSkillDetail(id, bs.name).catch(
+                                () => null,
+                              );
+                              if (d) setSkillDetail({ name: d.name, content: d.content || "（无正文）" });
+                            }}
+                          >
+                            <InfoIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       }
                     />
+                  ))
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+
+          {/* curator（技能策展器）自动生成的 Skill：归入自定义区，按实际启用状态显示 */}
+          <Card>
+            <CardContent>
+              <Stack spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                  <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
+                    curator 生成的 Skill
+                  </Typography>
+                  <Chip
+                    size="small"
+                    color={curatorOn ? "success" : "default"}
+                    label={curatorOn ? "curator 已开启" : "curator 已关闭"}
+                  />
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  Hermes 后台自动学习产生的技能（非平台下发）。curator 关闭后不再新增；
+                  已有技能可在下方按实际启用状态查看。若与自定义 Skill 语义重叠，建议关闭以免模型选错。
+                </Typography>
+                {curated.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    暂无 curator 生成的技能。
+                  </Typography>
+                ) : (
+                  curated.map((c) => (
+                    <Stack
+                      key={c.name}
+                      direction="row"
+                      spacing={1}
+                      sx={{ alignItems: "center" }}
+                    >
+                      <ListItemText
+                        primary={c.name}
+                        secondary={`${c.description ?? ""}${c.usage ? ` · 使用 ${c.usage} 次` : ""}`}
+                        sx={{ flexGrow: 1 }}
+                      />
+                      <Chip
+                        size="small"
+                        variant={c.enabled ? "filled" : "outlined"}
+                        color={c.enabled ? "success" : "default"}
+                        label={c.enabled ? "已启用" : "已禁用"}
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={async () => {
+                          const d = await getAgentBuiltinSkillDetail(id, c.name).catch(() => null);
+                          if (d) setSkillDetail({ name: d.name, content: d.content || "（无正文）" });
+                        }}
+                      >
+                        <InfoIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
                   ))
                 )}
               </Stack>
@@ -840,6 +932,33 @@ function EditInner() {
           </Card>
         </Box>
       ) : null}
+      {/* Skill 详情（内置 / curator 生成） */}
+      <Dialog
+        open={Boolean(skillDetail)}
+        onClose={() => setSkillDetail(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle id="skill-detail-title">{skillDetail?.name ?? ""}</DialogTitle>
+        <DialogContent dividers>
+          <Box
+            component="pre"
+            sx={{
+              m: 0,
+              fontFamily: "monospace",
+              fontSize: 12,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {skillDetail?.content ?? ""}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSkillDetail(null)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
     </Stack>
   );
 }
@@ -850,6 +969,7 @@ export default function AgentEditPage() {
       <AdminShell>
         <EditInner />
       </AdminShell>
+
     </GuardedShell>
   );
 }

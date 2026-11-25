@@ -20,7 +20,7 @@ from ..database import get_session
 from ..hermes.skill_sync import SkillSyncError, apply_custom_skills, remove_skill_dir
 from ..hermes.toolset_forcing import apply_forced_toolsets as _apply_forced_toolsets
 from ..hermes.toolset_forcing import compute_forced as _compute_forced
-from ..hermes.skills import SkillError, list_skills, toggle_skill
+from ..hermes.skills import SkillError, list_skills, read_skill, toggle_skill
 from ..models import (
     Agent,
     AgentBuiltinSkill,
@@ -384,14 +384,119 @@ async def list_agent_builtin_skills(
         name = s.get("name") or ""
         if not name:
             continue
+        # 只列 Hermes 自带的内置技能。provenance 取值：
+        #   bundled = 内置；agent = Agent/curator 运行时沉淀；custom = 平台下发的自定义技能
+        # 自定义技能有自己的管理页，curator 技能归入自定义区，均不应混入"内置 Skill"。
+        if (s.get("provenance") or "") != "bundled":
+            continue
         items.append(
             {
                 "name": name,
                 "description": s.get("description"),
+                "category": s.get("category"),
+                "usage": s.get("usage", 0),
+                "locked": bool(s.get("locked")),
+                "enabled": bool(s.get("enabled")),
                 "selected": name in selected,
             }
         )
     return {"agent_id": agent_id, "profile": agent.profile_name, "skills": items}
+
+
+@agent_router.get("/{agent_id}/skills/curated")
+async def list_agent_curated_skills(
+    agent_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """列出 Hermes curator（技能策展器）在该 Agent profile 里自动沉淀的技能。
+
+    curator 是 Hermes 的后台自动学习机制：把成功解决过的问题固化成技能。
+    这些技能由运行时产生、不在平台的 custom_skills 表里，但对模型可见并与
+    自定义 Skill 争夺匹配，因此单独列出（归入"自定义"区），并按 Hermes 里
+    的实际启用状态显示，便于用户查看/关闭。
+    """
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    # 平台管理的自定义技能名（这些不算 curator 产物）
+    managed = set(
+        (
+            await session.execute(
+                select(CustomSkill.name).join(
+                    AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id
+                ).where(AgentCustomSkill.agent_id == agent_id)
+            )
+        ).scalars().all()
+    )
+
+    try:
+        available = await list_skills(agent.profile_name)
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    items = []
+    for s in available:
+        name = s.get("name") or ""
+        if not name:
+            continue
+        if (s.get("provenance") or "") == "bundled":
+            continue
+        if name in managed:
+            continue
+        items.append(
+            {
+                "name": name,
+                "description": s.get("description"),
+                "category": s.get("category"),
+                "usage": s.get("usage", 0),
+                "enabled": bool(s.get("enabled")),
+                "provenance": s.get("provenance"),
+            }
+        )
+    return {
+        "agent_id": agent_id,
+        "profile": agent.profile_name,
+        "curator_enabled": bool(get_settings().curator_enabled),
+        "skills": items,
+    }
+
+
+@agent_router.get("/{agent_id}/skills/builtin/{name}")
+async def get_builtin_skill_detail(
+    agent_id: int,
+    name: str,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """读取单个内置 Skill 的详情（含 SKILL.md 正文），供 UI 展开查看。"""
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权查看他人的 Agent")
+    try:
+        meta = await read_skill(agent.profile_name, name)
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    # 只允许查看内置技能，避免越权读取其他来源的目录内容
+    if (meta.get("provenance") or "") != "bundled":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "不是内置技能")
+    return {
+        "name": meta.get("name") or name,
+        "description": meta.get("description"),
+        "category": meta.get("category"),
+        "enabled": meta.get("enabled"),
+        "usage": meta.get("usage"),
+        "content": meta.get("content") or "",
+    }
 
 
 @agent_router.put("/{agent_id}/skills/builtin")
@@ -532,8 +637,10 @@ async def set_agent_skills(
         session.add(AgentCustomSkill(agent_id=agent_id, skill_id=s.id))
     await session.flush()
 
-    res = _apply_profile(agent, skills)
+    # 先同步强制工具集（从 disabled 移除 skills/terminal 并写 config），
+    # 再下发技能文件——否则 skill_sync 读到旧的 disabled 状态会剥离 scripts/。
     await _sync_forced(agent, session)
+    res = _apply_profile(agent, skills)
     await session.commit()
     return {"bound": len(skills), "sync": res}
 
@@ -597,8 +704,8 @@ async def create_and_bind_skill(
             )
         ).scalars().all()
     )
-    res = _apply_profile(agent, bound)
     await _sync_forced(agent, session)
+    res = _apply_profile(agent, bound)
     await session.commit()
     return {"created": created, "skill": _out(s).model_dump(), "sync": res}
 

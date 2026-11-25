@@ -44,6 +44,38 @@ async def list_skills(profile: str) -> list[dict]:
     return []
 
 
+async def read_skill(profile: str, name: str) -> dict:
+    """读取某 profile 下单个 skill 的详情（含 SKILL.md 正文）。
+
+    先取列表拿到元数据，再按 name 请求详情；不同版本 dashboard 的详情
+    端点可能不存在，此时回退为仅元数据（content 为空）。
+    """
+    meta: dict = {}
+    for s in await list_skills(profile):
+        if (s.get("name") or "") == name:
+            meta = dict(s)
+            break
+    if not meta:
+        raise SkillError(f"技能不存在: {name}")
+
+    for path in (
+        f"/api/skills/{name}?profile={profile}",
+        f"/api/skills/detail?name={name}&profile={profile}",
+    ):
+        try:
+            async with DashboardClient() as client:
+                data = await client._request("GET", path)
+        except DashboardError:
+            continue
+        if isinstance(data, dict):
+            content = data.get("content") or data.get("body") or data.get("skill_md")
+            if content:
+                meta["content"] = content
+                break
+    meta.setdefault("content", "")
+    return meta
+
+
 async def toggle_skill(profile: str, name: str, enabled: bool) -> dict:
     """启用/禁用某 profile 的一个 skill。"""
     async with DashboardClient() as client:

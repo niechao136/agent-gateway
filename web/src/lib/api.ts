@@ -318,6 +318,38 @@ export async function listAgentBuiltinSkills(
   return request(`/agents/${agentId}/skills/builtin`);
 }
 
+/** 内置 Skill 详情（含 SKILL.md 正文）。 */
+export async function getAgentBuiltinSkillDetail(
+  agentId: number,
+  name: string,
+): Promise<{
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  usage?: number;
+  enabled?: boolean;
+  content: string;
+}> {
+  return request(`/agents/${agentId}/skills/builtin/${encodeURIComponent(name)}`);
+}
+
+/** curator（技能策展器）自动生成的技能，按 Hermes 实际启用状态返回。 */
+export async function listAgentCuratedSkills(agentId: number): Promise<{
+  agent_id: number;
+  profile: string;
+  curator_enabled: boolean;
+  skills: {
+    name: string;
+    description?: string | null;
+    category?: string | null;
+    usage?: number;
+    enabled: boolean;
+    provenance?: string | null;
+  }[];
+}> {
+  return request(`/agents/${agentId}/skills/curated`);
+}
+
 export async function setAgentBuiltinSkills(
   agentId: number,
   skillNames: string[],

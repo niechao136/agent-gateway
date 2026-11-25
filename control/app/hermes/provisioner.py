@@ -174,6 +174,15 @@ def apply_disabled_toolsets(agent: Agent) -> dict:
     else:
         cfg.pop("agent", None)
 
+    # curator（技能策展器）默认关闭：它会在后台把成功经验自动沉淀为技能，
+    # 与平台下发的自定义 Skill 产生同名/同义冲突（如 weather-query）。
+    # 需要自动学习时在 .env 里把 CURATOR_ENABLED 设为 true。
+    curator = cfg.get("curator")
+    if not isinstance(curator, dict):
+        curator = {}
+    curator["enabled"] = bool(get_settings().curator_enabled)
+    cfg["curator"] = curator
+
     _atomic_write(path, yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     logger.info("已写入 %s: disabled_toolsets=%s", path, disabled)
     return {"disabled": disabled}

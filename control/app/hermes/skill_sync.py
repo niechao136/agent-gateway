@@ -33,6 +33,24 @@ class SkillSyncError(Exception):
     pass
 
 
+def skill_slug(skill: object) -> str:
+    """技能的目录名：优先用持久化的 slug，否则从 name 生成稳定的 ASCII slug。
+
+    中文名（如"天气查询"）无法直接转 ASCII，回退为 "skill-<id>"，
+    保证稳定、唯一、可安全用于路径。
+    """
+    slug = (getattr(skill, "slug", None) or "").strip()
+    if slug:
+        return slug
+    name = (getattr(skill, "name", "") or "").strip()
+    out = "".join(c if (c.isascii() and (c.isalnum() or c in "-_")) else "-" for c in name.lower())
+    out = "-".join(p for p in out.split("-") if p)
+    if not out:
+        sid = getattr(skill, "id", None)
+        out = f"skill-{sid}" if sid is not None else "skill"
+    return out[:64]
+
+
 def profile_skills_dir(profile: str, data_root: str) -> Path:
     root = Path(data_root)
     if profile == "default":
@@ -152,7 +170,16 @@ def apply_custom_skills(
 
     new_names: list[str] = []
     for s in skills:
-        name = s.name
+        # 目录名用 ASCII slug（而非中文名）：容器 locale 常为 POSIX，
+        # 中文路径在部分 shell 场景下解析脆弱；显示名仍用 s.name。
+        name = skill_slug(s)
+        # 旧版本用中文名做目录名，迁移到 slug 后清理遗留目录
+        legacy = base / (s.name or "")
+        if legacy.is_dir() and legacy.name != name:
+            import shutil
+
+            shutil.rmtree(legacy, ignore_errors=True)
+            removed += 1
         files = s.files or {}
         has_scripts = any(
             (f.startswith("scripts/") or "/scripts/" in f) for f in files.keys()

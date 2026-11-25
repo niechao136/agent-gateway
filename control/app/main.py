@@ -85,6 +85,19 @@ async def _bootstrap_admin() -> None:
 async def lifespan(app: FastAPI):
     await init_models()
     await _bootstrap_admin()
+    # 存量环境自愈：对齐技能目录名/脚本/curator 影子技能。
+    # 默认开启（幂等、无问题时零写入），可用 SELF_HEAL_ON_START=false 关闭。
+    if get_settings().self_heal_on_start:
+        try:
+            from .database import get_session_factory
+            from .heal import heal_profiles
+
+            async with get_session_factory()() as _s:
+                _stats = await heal_profiles(_s)
+                await _s.commit()
+            logger.info("启动自愈完成：%s", _stats)
+        except Exception as exc:  # 自愈失败不阻断启动
+            logger.warning("启动自愈失败（不影响启动）：%s", exc)
     _cleanup.start()
     # 连接器：拉起全部 enabled（Telegram/飞书/Slack 长连接）
     from .connectors.base import registry
