@@ -18,16 +18,16 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings
+from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
 async def heal_profiles(session: AsyncSession) -> dict:
     """对全部 Agent 做一次技能自愈。返回统计，异常不阻断启动。"""
-    from ..models import Agent, CustomSkill, AgentCustomSkill
-    from ..hermes import skill_sync
-    from ..hermes.toolset_forcing import compute_forced, apply_forced_toolsets
+    from .models import Agent, CustomSkill, AgentCustomSkill
+    from .hermes import skill_sync
+    from .hermes.toolset_forcing import compute_forced, apply_forced_toolsets
 
     stats = {"agents": 0, "resynced": 0, "errors": 0}
     settings = get_settings()
@@ -81,8 +81,8 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
     只移动目录到 ``.archived/``，不删除内容，可人工恢复。
     """
     from pathlib import Path
-    from ..hermes.skills import list_skills
-    from ..hermes.skill_sync import profile_skills_dir
+    from .hermes.skills import list_skills
+    from .hermes.skill_sync import profile_skills_dir, skill_slug
 
     archived = 0
     for agent in agents:
@@ -107,12 +107,17 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
                 continue
             if name in managed:
                 continue  # 平台下发的自定义技能，不动
-            src = base / name
-            if not src.is_dir():
+            # 目录名可能是 ASCII slug（新）或原始 name（旧），两者都试
+            from types import SimpleNamespace
+
+            slug = skill_slug(SimpleNamespace(name=name, id=None, slug=None))
+            candidates = [base / slug, base / name]
+            src = next((c for c in candidates if c.is_dir()), None)
+            if src is None:
                 continue
             dst_dir = base / ".archived"
             dst_dir.mkdir(parents=True, exist_ok=True)
-            dst = dst_dir / name
+            dst = dst_dir / src.name
             try:
                 if dst.exists():
                     import shutil
