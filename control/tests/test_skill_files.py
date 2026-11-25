@@ -71,15 +71,19 @@ async def test_skill_files_keep_subdirs_and_block_traversal(monkeypatch, client,
     assert not (base / ".." / "evil.txt").exists()
 
 
-async def test_scripts_stripped_when_terminal_disabled(monkeypatch, client, tmp_path):
-    """terminal 被禁用时剥离 scripts/（兜底）；正常绑定时 toolset_forcing 会先开启 terminal。"""
+async def test_scripts_kept_because_terminal_forced_on(monkeypatch, client, tmp_path):
+    """绑定带脚本的 Skill 时，toolset_forcing 会强制开启 terminal，脚本必须保留。
+
+    历史上 ``_sync_forced`` 在 ``_apply_profile`` 之后执行，导致 skill_sync
+    按过期的 disabled_toolsets 误判 terminal 被禁用而剥离 scripts/，
+    最终模型执行脚本时报 No such file or directory。
+    """
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "hermes_data_root", str(tmp_path))
 
     tok = await _user_token(client)
     sid = (await client.post("/api/skills", headers=_h(tok), json=SKILL_WITH_FILES)).json()["id"]
-    # 新建 Agent 时禁用 terminal（默认只读助手已禁）
     await client.post("/api/agents", headers=_h(tok), json={"slug": "noterm", "name": "n"})
     aid = (await client.get("/api/agents", headers=_h(tok))).json()[0]["id"]
     await client.put(f"/api/agents/{aid}/skills", headers=_h(tok), json={"skill_ids": [sid]})
@@ -87,10 +91,10 @@ async def test_scripts_stripped_when_terminal_disabled(monkeypatch, client, tmp_
     from app.hermes.skill_sync import profile_skills_dir
 
     base = profile_skills_dir("agent-u1-noterm", str(tmp_path)) / "deploy-helper"
-    # terminal 真被禁用时剥离脚本（避免技能引用不存在的文件）
-    assert not (base / "scripts" / "run.sh").exists(), "禁用 terminal 时应剥离脚本"
+    # 带脚本的 Skill 会强制开启 terminal，脚本必须存在（否则技能无法工作）
+    assert (base / "scripts" / "run.sh").is_file(), "terminal 被强制开启后脚本应保留"
     skill_md = (base / "SKILL.md").read_text(encoding="utf-8")
-    # 不再注入 requires_toolsets（会让 Hermes 隐藏技能，天气 skill 曾因此失效）
+    # 不注入 requires_toolsets（会让 Hermes 隐藏技能，天气 skill 曾因此失效）
     assert "requires_toolsets" not in skill_md
     assert skill_md.count("---") == 2, "只应有一个 frontmatter 块"
     # 其他目录保留
