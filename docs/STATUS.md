@@ -39,6 +39,10 @@
 - **Hermes 镜像固定** `v0.23.2`（= 生产已验证 digest `sha256:d6746a08...`），`HERMES_IMAGE` 可覆盖，不再随 `:latest` 漂移。
 - **`.gitattributes`** 锁定 `*.sh`/`scripts/*`/`*.yml` 为 LF，防 Windows CRLF。
 - 模板：`.env.example`（分组注释，无需迁移脚本）。
+- **数据库迁移自动化**：启动时 `init_models()` 在 `create_all` 后调用 `app/migrations.py::ensure_columns`，对比模型与 DB 自动 `ALTER TABLE ADD COLUMN`（幂等；NOT NULL 列自动补 DEFAULT；失败只告警不阻断）。新增字段无需手工 SQL。
+- **模型 base_url 隧道重写（方案 A）**：模板始终存逻辑地址（如 Google 官方 URL），部署环境差异不入库。`TUNNEL_ENABLED=1` 且 host 命中 `TUNNEL_UPSTREAM_HOSTS` 时，把 `scheme://host` 换成 `TUNNEL_LOCAL_BASE`（path 原样保留）。用于模型测试与 apply-model 两处；生产直连时保持 `TUNNEL_ENABLED=0` 即不重写。
+- **control 侧隧道**：`TUNNEL_ENABLED=1` 且 `/opt/data/.ssh_tunnel_key` 存在时，control 的 entrypoint 先建 `127.0.0.1:8899` 转发再起 uvicorn，使模型"连接测试"也能走隧道（hermes 侧另有自己的隧道）。
+- **`/health` 对外可访问**：nginx 新增 `location = /health` 直连 control，返回 `{status,service,version}`；管理页侧栏底部显示版本号。
 
 ## 已知约束 / 待办
 
