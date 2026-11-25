@@ -15,7 +15,7 @@ import logging
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.schema import AddColumn
+from sqlalchemy.schema import CreateColumn
 
 from .models import Base
 
@@ -41,7 +41,21 @@ async def ensure_columns(conn: AsyncConnection, engine: Engine) -> int:
         for col_name in missing:
             column = table.columns[col_name]
             try:
-                ddl = str(AddColumn(column).compile(dialect=engine.dialect))
+                col_ddl = str(CreateColumn(column).compile(dialect=engine.dialect))
+                # NOT NULL 且无默认值的新列加到有数据的表会失败。
+                # 自动补一个与 Python 侧 default 一致的 DEFAULT，保证存量行可读。
+                if not column.nullable and column.server_default is None:
+                    py_default = getattr(column.default, "arg", None) if column.default else None
+                    if py_default is not None and not callable(py_default):
+                        if isinstance(py_default, bool):
+                            lit = "true" if py_default else "false"
+                        elif isinstance(py_default, (int, float)):
+                            lit = str(py_default)
+                        else:
+                            lit = "'" + str(py_default).replace("'", "''") + "'"
+                        col_ddl = f"{col_ddl} DEFAULT {lit}"
+                        logger.info("补列 %s.%s 自动追加 DEFAULT %s", table.name, col_name, lit)
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN {col_ddl}'
             except Exception as exc:  # pragma: no cover - 方言差异兜底
                 logger.warning("跳过补列 %s.%s：无法生成 DDL (%s)", table.name, col_name, exc)
                 continue
