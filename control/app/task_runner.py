@@ -111,13 +111,28 @@ async def _run_action(
     await session.flush()
     chunks: list[str] = []
     async with gw_mod.GatewayClient() as gw:
-        async for frame in gw.chat_stream(
+        # 必须先经 chat_proxy.translate_stream 翻译：hermes 原始帧是
+        # assistant.delta / run.completed 等，extract_text_and_usage 只认
+        # 翻译后的 token 事件。直接喂原始帧会永远提取到空字符串，
+        # 导致连接器/日志/知识库收到的结果全空（只剩任务名）。
+        raw = gw.chat_stream(
             conv.hermes_session_id, task.payload, profile=agent.profile_name
+        )
+        async for frame in chat_proxy.translate_stream(
+            raw, thread_id=conv.hermes_session_id
         ):
             text, _ = chat_proxy.extract_text_and_usage(frame)
             if text:
                 chunks.append(text)
-    return "".join(chunks)[:4000]
+    result = "".join(chunks).strip()
+    if not result:
+        logger.warning(
+            "任务 %s 的 Agent 回复为空（session=%s），请检查模型与 profile 配置",
+            task.id,
+            conv.hermes_session_id,
+        )
+        result = "（Agent 未返回内容）"
+    return result[:4000]
 
 
 async def _deliver(
@@ -198,18 +213,42 @@ async def _deliver(
     return done
 
 
-async def run_task(task_id: int) -> str:
-    """手动执行指定任务一次，返回结果摘要。"""
+async def create_run(task_id: int) -> int:
+    """先落一条 TaskRun 记录并立即返回其 id（不等待执行）。
+
+    供 "立即运行" API 使用：接口只负责排队，执行在后台进行，
+    前端凭 run_id 轮询 /runs 看进度与结果。
+    """
+    factory: async_sessionmaker[AsyncSession] = get_session_factory()
+    async with factory() as session:
+        task = (
+            await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        ).scalar_one_or_none()
+        if task is None:
+            raise RuntimeError("任务不存在")
+        run = TaskRun(task_id=task_id, status="queued")
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+        return run.id
+
+
+async def execute_run(run_id: int, task_id: int) -> None:
+    """执行一个已排队的 TaskRun（后台任务入口）。"""
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
     settings = get_settings()
     now = datetime.now(UTC)
     async with factory() as session:
-        task = (await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))).scalar_one_or_none()
-        if task is None:
-            raise RuntimeError("任务不存在")
-        run = TaskRun(task_id=task_id, status="running")
-        session.add(run)
-        await session.flush()
+        run = (await session.execute(select(TaskRun).where(TaskRun.id == run_id))).scalar_one_or_none()
+        task = (
+            await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        ).scalar_one_or_none()
+        if run is None or task is None:
+            logger.warning("执行任务失败：run=%s task=%s 不存在", run_id, task_id)
+            return
+        run.status = "running"
+        run.started_at = now
+        await session.commit()
         try:
             result = await _run_action(session, task, settings)
             delivered = await _deliver(session, task, result, settings)
@@ -222,11 +261,24 @@ async def run_task(task_id: int) -> str:
             run.status = "error"
             run.summary = str(exc)[:300]
             task.last_status = "error"
-            logger.exception("手动执行任务 %s 失败", task_id)
+            logger.exception("执行任务 %s 失败", task_id)
         task.last_run_at = now
         task.next_run_at = _compute_next(task, now)
         await session.commit()
-        return run.summary or ""
+
+
+async def run_task(task_id: int) -> str:
+    """手动执行指定任务一次并等待完成（内部/兼容用）。
+
+    注意：HTTP 接口不应直接 await 它（Agent 对话可能耗时数分钟），
+    应先 create_run() 立即返回 run_id，再 execute_run() 后台执行。
+    """
+    run_id = await create_run(task_id)
+    await execute_run(run_id, task_id)
+    factory: async_sessionmaker[AsyncSession] = get_session_factory()
+    async with factory() as session:
+        run = (await session.execute(select(TaskRun).where(TaskRun.id == run_id))).scalar_one_or_none()
+        return (run.summary if run else "") or ""
 
 
 async def run_due_tasks(limit: int = 20) -> int:

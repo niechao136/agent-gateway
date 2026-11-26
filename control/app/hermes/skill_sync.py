@@ -124,10 +124,18 @@ def _skill_md(skill, *, strip_scripts: bool, skill_dir: str | None = None) -> st
     # 用 Hermes 官方模板变量 ${HERMES_SKILL_DIR} 规范化（Hermes 加载时替换为
     # 该技能绝对目录），作者仍只写相对路径，不把绝对路径写死进内容。
     content = _rewrite_script_paths(content)
-    # SKILL.md 的 name 用展示名（可中文，供模型与用户阅读）；
-    # 目录名仍用 ASCII slug（skill_slug），二者解耦。
+    # Hermes 用 frontmatter 的 `name` 作为技能**身份**
+    # (tools/skills_tool.py: frontmatter.get("name", skill_md.parent.name))。
+    # 若这里写中文展示名，Hermes 报出的名字就和平台托管名单里的 ASCII slug
+    # 对不上，会被误判成 curator 自动生成的"影子技能"（列表里出现中文名、
+    # 删不掉）。因此 name 必须用 slug，展示名另放 display_name 字段。
+    islug = skill_slug(skill)
     shown = (getattr(skill, "display_name", None) or skill.name or "").replace('"', "'")
-    return f"---\nname: {shown}\ndescription: \"{desc}\"\n---\n\n{content}\n"
+    lines = [f"---\nname: {islug}"]
+    if shown and shown != islug:
+        lines.append(f"display_name: \"{shown}\"")
+    lines.append(f"description: \"{desc}\"\n---\n\n{content}\n")
+    return "\n".join(lines)
 
 
 def _rewrite_script_paths(content: str) -> str:

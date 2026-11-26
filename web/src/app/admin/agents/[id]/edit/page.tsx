@@ -41,6 +41,7 @@ import {
   listA2AEndpoints,
   listAgentAPIKeys,
   listAgentCuratedSkills,
+  deleteAgentCuratedSkill,
   listAgentBuiltinSkills,
   listAgentSkillBindings,
   listMCPServers,
@@ -106,6 +107,7 @@ function EditInner() {
     { name: string; description?: string | null; enabled: boolean; usage?: number }[]
   >([]);
   const [curatorOn, setCuratorOn] = useState(false);
+  const [curatedToDelete, setCuratedToDelete] = useState<string | null>(null);
 
   // A2A 绑定
   const [a2aAll, setA2aAll] = useState<A2AEndpoint[]>([]);
@@ -192,6 +194,21 @@ function EditInner() {
       setError(e instanceof ApiError ? e.message : "保存失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function deleteCurated(name: string) {
+    setError(null);
+    setOk(null);
+    try {
+      await deleteAgentCuratedSkill(id, name);
+      setOk(`已删除 curator 技能「${name}」`);
+      const cur = await listAgentCuratedSkills(id).catch(() => null);
+      setCurated(cur?.skills ?? []);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "删除失败");
+    } finally {
+      setCuratedToDelete(null);
     }
   }
 
@@ -590,6 +607,13 @@ function EditInner() {
                         color={c.enabled ? "success" : "default"}
                         label={c.enabled ? "已启用" : "已禁用"}
                       />
+                      <IconButton
+                        size="small"
+                        title="删除该技能"
+                        onClick={() => setCuratedToDelete(c.name)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
                     </Stack>
                   ))
                 )}
@@ -909,6 +933,16 @@ function EditInner() {
           </Card>
         </Box>
       ) : null}
+
+      <ConfirmDialog
+        open={curatedToDelete !== null}
+        title="删除 curator 技能"
+        message={`确定删除「${curatedToDelete ?? ""}」吗？该技能由 curator 自动生成，删除后会归档到 profile 目录之外，可人工恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={() => void deleteCurated(curatedToDelete!)}
+        onClose={() => setCuratedToDelete(null)}
+      />
     </Stack>
   );
 }

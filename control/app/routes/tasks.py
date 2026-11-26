@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -13,7 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_session
 from ..models import ScheduledTask, TaskRun, UserRole
 from ..security import CurrentUser, can_modify
-from ..task_runner import DELIVERY_CHOICES, run_due_tasks, run_task
+from ..task_runner import (
+    DELIVERY_CHOICES,
+    create_run,
+    execute_run,
+    run_due_tasks,
+    run_task,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -125,11 +135,28 @@ async def delete_task(task_id: int, user: CurrentUser, session: Annotated[AsyncS
     await session.commit()
 
 
-@router.post("/{task_id}/run", response_model=dict)
+@router.post("/{task_id}/run", response_model=dict, status_code=202)
 async def run_now(task_id: int, user: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]):
+    """立即执行任务：只排队并**立刻**返回 run_id，不等待执行完成。
+
+    Agent 对话可能耗时数分钟，早先这里直接 await run_task()，
+    导致 HTTP 请求长时间挂起甚至超时。现在改为：
+    1) 先落一条 queued 状态的 TaskRun 并返回其 id；
+    2) 执行放到后台 asyncio 任务里；
+    3) 前端凭 run_id 轮询 /tasks/{id}/runs 查看状态与结果。
+    """
     t = await _task_or_404(session, task_id, user)
-    summary = await run_task(t.id)
-    return {"ok": True, "summary": summary[:300]}
+    run_id = await create_run(t.id)
+    asyncio.create_task(_execute_bg(run_id, t.id))
+    return {"ok": True, "run_id": run_id, "status": "queued"}
+
+
+async def _execute_bg(run_id: int, task_id: int) -> None:
+    """后台执行入口，吞掉所有异常（异常已写入 TaskRun）。"""
+    try:
+        await execute_run(run_id, task_id)
+    except Exception:  # pragma: no cover - execute_run 内部已记录
+        logger.exception("后台执行任务 %s 失败", task_id)
 
 
 @router.post("/sweep", response_model=dict)

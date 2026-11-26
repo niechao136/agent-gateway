@@ -129,8 +129,6 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
                 continue
             if (s.get("provenance") or "") != "agent":
                 continue
-            if name in managed:
-                continue  # 平台下发的自定义技能，不动
             # 目录名可能是 ASCII slug（新）或原始 name（旧），两者都试
             from types import SimpleNamespace
 
@@ -138,6 +136,12 @@ async def _archive_curator_skills(agents: list, data_root: str) -> int:
             candidates = [base / slug, base / name]
             src = next((c for c in candidates if c.is_dir()), None)
             if src is None:
+                continue
+            # 关键：平台下发的自定义技能目录也在这个目录里，必须按**目录名**
+            # 判断归属，不能只按 Hermes 上报的 name。历史版本把 SKILL.md 的
+            # name 写成了中文展示名，导致 name 与 manifest 里的 slug 对不上，
+            # 仅凭 name 判断会把真正的自定义技能误归档（表现为"技能莫名消失"）。
+            if src.name in managed or name in managed:
                 continue
             # 归档目录必须在 skills/ 之外：Hermes 会扫描 skills/ 下所有子目录，
             # 放在 skills/.archived 里仍然会被当成可用技能。

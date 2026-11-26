@@ -358,6 +358,17 @@ export async function listAgentCuratedSkills(agentId: number): Promise<{
   return request(`/agents/${agentId}/skills/curated`);
 }
 
+/** 删除 curator 自动生成的技能（归档到 skills/ 之外，安全可恢复）。 */
+export function deleteAgentCuratedSkill(
+  agentId: number,
+  name: string,
+): Promise<void> {
+  return request(
+    `/agents/${agentId}/skills/curated/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function setAgentBuiltinSkills(
   agentId: number,
   skillNames: string[],
@@ -1061,7 +1072,9 @@ export function updateTask(id: number, body: Partial<ScheduledTask>): Promise<Sc
 export function deleteTask(id: number): Promise<void> {
   return request(`/tasks/${id}`, { method: "DELETE" });
 }
-export function runTaskNow(id: number): Promise<{ ok: boolean; summary: string }> {
+export function runTaskNow(
+  id: number,
+): Promise<{ ok: boolean; run_id: number; status: string }> {
   return request(`/tasks/${id}/run`, { method: "POST" });
 }
 export function listTaskRuns(id: number): Promise<TaskRunInfo[]> { return request(`/tasks/${id}/runs`); }

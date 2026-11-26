@@ -114,8 +114,27 @@ function TasksView() {
 
   async function run(t: ScheduledTask) {
     setError(null);
-    try { const r = await runTaskNow(t.id); setOk(`执行完成: ${r.summary}`); await load(); }
-    catch (e) { setError(e instanceof ApiError ? e.message : "执行失败"); }
+    try {
+      // 立即执行改为异步：接口马上返回 run_id，不再阻塞到任务跑完。
+      const r = await runTaskNow(t.id);
+      setOk(`已提交执行（run #${r.run_id}），稍后可在「历史」中查看结果`);
+      await load();
+      // 后台轮询若干次，跑完再刷新一次历史与列表
+      let tries = 0;
+      const timer = window.setInterval(async () => {
+        tries += 1;
+        if (tries > 30) { window.clearInterval(timer); return; }
+        try {
+          const rows = await listTaskRuns(t.id);
+          const hit = rows.find((x) => x.id === r.run_id);
+          if (hit && hit.status !== "running") {
+            window.clearInterval(timer);
+            setOk(`执行完成（run #${r.run_id}）: ${hit.status}`);
+            await load();
+          }
+        } catch { window.clearInterval(timer); }
+      }, 2000);
+    } catch (e) { setError(e instanceof ApiError ? e.message : "执行失败"); }
   }
 
   async function showRuns(t: ScheduledTask) {

@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database import get_session
-from ..hermes.skill_sync import SkillSyncError, apply_custom_skills, remove_skill_dir
+from ..hermes.skill_sync import (
+    SkillSyncError,
+    apply_custom_skills,
+    remove_skill_dir,
+    skill_slug,
+)
 from ..hermes.toolset_forcing import apply_forced_toolsets as _apply_forced_toolsets
 from ..hermes.toolset_forcing import compute_forced as _compute_forced
 from ..hermes.skills import SkillError, list_skills, read_skill, toggle_skill
@@ -482,16 +487,23 @@ async def list_agent_curated_skills(
     if not can_modify(user, agent.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
 
-    # 平台管理的自定义技能名（这些不算 curator 产物）
-    managed = set(
-        (
-            await session.execute(
-                select(CustomSkill.name).join(
-                    AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id
-                ).where(AgentCustomSkill.agent_id == agent_id)
-            )
-        ).scalars().all()
-    )
+    # 平台管理的自定义技能（这些不算 curator 产物）。
+    # 同时收集 name 与目录 slug：历史版本把 SKILL.md 的 name 写成了中文
+    # 展示名，与 manifest 里的 ASCII slug 不一致，只按 name 判断会把平台
+    # 下发的技能误判成 curator 技能（就是"curator 卡片里冒出中文天气查询"）。
+    bound_skills = (
+        await session.execute(
+            select(CustomSkill)
+            .join(AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id)
+            .where(AgentCustomSkill.agent_id == agent_id)
+        )
+    ).scalars().all()
+    managed: set[str] = set()
+    for s in bound_skills:
+        managed.add(s.name or "")
+        if s.display_name:
+            managed.add(s.display_name)
+        managed.add(skill_slug(s))
 
     try:
         available = await list_skills(agent.profile_name)
@@ -520,9 +532,96 @@ async def list_agent_curated_skills(
     return {
         "agent_id": agent_id,
         "profile": agent.profile_name,
-        "curator_enabled": bool(get_settings().curator_enabled),
+        # curator 是 Agent 级开关；未显式设置时回退到全局默认。
+        "curator_enabled": (
+            bool(agent.curator_enabled)
+            if agent.curator_enabled is not None
+            else bool(get_settings().curator_enabled)
+        ),
         "skills": items,
     }
+
+
+@agent_router.delete("/{agent_id}/skills/curated/{name}", status_code=204)
+async def delete_curated_skill(
+    agent_id: int,
+    name: str,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """删除 curator 自动生成的技能（安全归档，不物理删除内容）。
+
+    curator 技能不经过平台技能表，只能从 profile 目录移除。Hermes 会扫描
+    ``skills/`` 下所有子目录，所以归档目标必须放在 ``skills/`` 之外，否则
+    删掉后仍会被当成可用技能（表现为"删不掉"）。
+    """
+    agent = (
+        await session.execute(select(Agent).where(Agent.id == agent_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent 不存在")
+    if not can_modify(user, agent.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "无权操作他人的 Agent")
+
+    # 平台管理的自定义技能不允许走这个入口删除
+    bound = (
+        await session.execute(
+            select(CustomSkill)
+            .join(AgentCustomSkill, AgentCustomSkill.skill_id == CustomSkill.id)
+            .where(AgentCustomSkill.agent_id == agent_id)
+        )
+    ).scalars().all()
+    managed: set[str] = set()
+    for s in bound:
+        managed.update({s.name or "", skill_slug(s)})
+        if s.display_name:
+            managed.add(s.display_name)
+    if name in managed:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "该技能由平台管理，请在自定义技能页解绑"
+        )
+
+    try:
+        available = await list_skills(agent.profile_name)
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    hit = next(
+        (
+            s
+            for s in available
+            if (s.get("name") or "") == name
+            and (s.get("provenance") or "") != "bundled"
+        ),
+        None,
+    )
+    if hit is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "curator 技能不存在")
+
+    from types import SimpleNamespace
+
+    from ..hermes.skill_sync import profile_skills_dir
+
+    settings = get_settings()
+    base = profile_skills_dir(agent.profile_name, settings.hermes_data_root)
+    slug = skill_slug(SimpleNamespace(name=name, id=None, slug=None))
+    src = next((c for c in (base / slug, base / name) if c.is_dir()), None)
+    if src is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "技能目录不存在")
+
+    import shutil
+
+    dst_dir = base.parent / ".archived-skills"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / src.name
+    try:
+        if dst.exists():
+            shutil.rmtree(dst, ignore_errors=True)
+        src.rename(dst)
+    except OSError as exc:  # 兜底：直接删除，保证用户能删掉
+        logger.warning("归档 curator 技能失败，改为直接删除 %s: %s", src, exc)
+        shutil.rmtree(src, ignore_errors=True)
+    logger.info("已删除 curator 技能 profile=%s name=%s", agent.profile_name, name)
 
 
 @agent_router.get("/{agent_id}/skills/builtin/{name}")
