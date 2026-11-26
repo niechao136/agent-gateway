@@ -7,10 +7,16 @@
 #   3. 调用 docker compose（固定 --env-file .env --profile full）
 #
 # 用法：
+#   ./scripts/compose.sh deploy          # ★ 推荐：build → 强制重建全部容器 → 等健康
 #   ./scripts/compose.sh up -d --no-build
 #   ./scripts/compose.sh build
 #   ./scripts/compose.sh restart hermes
 #   ./scripts/compose.sh config          # 查看最终渲染配置
+#
+# 为什么需要 deploy：
+#   单纯 `build` + `up -d --no-build` 时，compose 若判定容器配置未变，
+#   不会替换旧容器 —— nginx 不会重载新配置、web 不会用新镜像。
+#   必须 `--force-recreate` 才能让配置/镜像变更真正生效。
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -59,5 +65,41 @@ export PIP_INDEX_URL NPM_REGISTRY TUNNEL_ENABLED
 export DOCKER_BUILDKIT
 
 echo "[compose] INTERNET_MODE=${INTERNET_MODE} PIP=${PIP_INDEX_URL} NPM=${NPM_REGISTRY} TUNNEL=${TUNNEL_ENABLED} BUILDKIT=${DOCKER_BUILDKIT}"
+
+# deploy：构建 → 强制重建全部 → 等待健康。避免"构建了但容器没换"的坑。
+if [ "${1:-}" = "deploy" ]; then
+    shift
+    COMPOSE="docker compose --env-file .env --profile full"
+
+    echo "[deploy] 1/3 构建镜像…"
+    $COMPOSE build
+
+    echo "[deploy] 2/3 强制重建全部容器…"
+    $COMPOSE up -d --force-recreate --remove-orphans
+
+    echo "[deploy] 3/3 等待健康检查…"
+    # 最多等 180 秒；只等带 healthcheck 的容器，其他容器只要 up 即可。
+    _i=0
+    while [ "$_i" -lt 60 ]; do
+        _unhealthy=$(docker ps --format '{{.Names}} {{.Status}}' \
+            | grep '^ag-' | grep -E 'Starting|health: starting|unhealthy' || true)
+        if [ -z "$_unhealthy" ]; then
+            break
+        fi
+        _i=$((_i + 1))
+        sleep 3
+    done
+
+    echo "[deploy] 完成，当前状态："
+    docker ps --format '{{.Names}} {{.Status}}' | grep '^ag-' || true
+    _bad=$(docker ps --format '{{.Names}} {{.Status}}' \
+        | grep '^ag-' | grep -v 'Up ' || true)
+    if [ -n "$_bad" ]; then
+        echo "[deploy] ⚠ 以下容器未正常运行：" >&2
+        echo "$_bad" >&2
+        exit 1
+    fi
+    exit 0
+fi
 
 exec docker compose --env-file .env --profile full "$@"
