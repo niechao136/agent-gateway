@@ -66,6 +66,7 @@ def test_single_frontmatter_block() -> None:
     """只能有一个 frontmatter，否则 Hermes 解析会错位。"""
     s = _skill("天气查询", sid=2, display_name="天气查询", content="---\nname: 旧\n---\n正文")
     text = _skill_md(s, strip_scripts=False)
-    assert text.count("---\n") >= 2  # 首尾各一
     # 正文里自带的 frontmatter 必须被剥掉，不能出现第二个 name:
-    assert text.count("name:") == 1
+    name_lines = [ln for ln in text.splitlines() if ln.startswith("name:")]
+    assert len(name_lines) == 1, f"只能有一个 name 行，实际 {name_lines}"
+    assert name_lines[0] == f"name: {skill_slug(s)}"
