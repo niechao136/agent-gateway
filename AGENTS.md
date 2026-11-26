@@ -36,8 +36,9 @@ cd web && pnpm test && pnpm exec tsc --noEmit && pnpm build
 # 生产部署（srv-01 新加坡，/github/agent-gateway）
 git push origin master
 ssh ubuntu@43.156.187.79 'cd /github/agent-gateway && git pull'
-docker compose --env-file .env --profile full build   # 改代码后必须 build，up 不会重建
-docker compose --env-file .env --profile full up -d --no-build
+sh scripts/compose.sh deploy    # 改代码后一键部署：build → force-recreate → 等健康
+# 切勿只用 "up -d --no-build"：compose 判定配置未变时不会重建容器，
+# 会出现"镜像更新了但页面/配置没变"的假象。
 ```
 
 完整命令与坑见 [docs/conventions.md](docs/conventions.md)。

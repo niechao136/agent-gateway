@@ -36,8 +36,9 @@ cd web && pnpm test && pnpm exec tsc --noEmit && pnpm build
 # 部署（srv-01）
 cd /github/agent-gateway
 sudo -u devops git pull origin master
-sudo -u devops docker compose --env-file .env --profile full build   # 改代码后必 build
-sudo -u devops docker compose --env-file .env --profile full up -d --no-build
+sudo -u devops sh scripts/compose.sh deploy   # 一键：build → force-recreate → 等健康
+# 切勿只用 up -d --no-build：配置未变时 compose 不重建容器，
+# 会出现镜像更新了但页面/配置没变的假象（nginx 配置、web 前端尤其明显）。
 ```
 
 ## 环境与坑（实测）
@@ -46,7 +47,7 @@ sudo -u devops docker compose --env-file .env --profile full up -d --no-build
 |---|---|
 | 本地 WSL `/mnt/d` | 9p 文件系统，`pnpm install` 卡死；前端测试走 Windows 本地或 Docker |
 | 后端镜像 | 本地用清华源；服务器用默认源更快 |
-| 改代码后 | 必须 `docker compose build`，`up` 不会重建镜像 |
+| 改代码后 | 用 `sh scripts/compose.sh deploy`（build + force-recreate + 等健康）；单纯 `up` 既不重建镜像也不重建容器 |
 | Hermes API key | `/opt/data/.env` 以 `override=True` 覆盖容器环境变量；控制层运行时读文件（`resolve_api_key`） |
 | profile 路由 | 必须 `/p/{profile}/...` 且用 profile 专属 key；无前缀走 default profile（无模型 → 报 not connected） |
 | toolset 启停 | 真实字段是 `platform_toolsets.api_server`；`hermes -p <profile> tools enable a2a` 才是正确命令（HERMES_PROFILE 环境变量无效） |
