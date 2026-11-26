@@ -147,10 +147,10 @@ def _validate_auth(body: EndpointIn | EndpointUpdateIn) -> None:
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "token 不能是 URL；请填写实际的 API Key（agk_ 开头）或鉴权值",
             )
-        if t == "bearer" and not tok.startswith("agk_"):
+        if t == "bearer" and not tok.startswith("agk_") and tok.startswith("http"):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "bearer token 应以 agk_ 开头（在目标 Agent 的 API Key 页面生成）",
+                "bearer token 看起来是 URL；请填写实际的 API Key 或鉴权值",
             )
         if t in ("header", "query") and not body.auth_name:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"auth_type={t} 需要提供 auth_name")
