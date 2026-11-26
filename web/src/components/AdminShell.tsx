@@ -35,6 +35,7 @@ import MenuIcon from "@mui/icons-material/Menu";
 import LogoutIcon from "@mui/icons-material/Logout";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import ChatIcon from "@mui/icons-material/Chat";
+import SettingsIcon from "@mui/icons-material/Settings";
 import { getHealth, getRole, getStoredUser, logout } from "@/lib/api";
 import { useColorMode } from "@/lib/theme";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
@@ -69,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/api-keys", label: "API 密钥", icon: <KeyIcon /> },
   { href: "/admin/users", label: "用户管理", icon: <AdminPanelSettingsIcon />, adminOnly: true },
   { href: "/admin/tasks", label: "定时任务", icon: <ScheduleIcon /> },
+  { href: "/admin/settings", label: "系统设置", icon: <SettingsIcon />, adminOnly: true },
 ];
 
 /**
@@ -138,15 +140,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <ListItemText primary="对话" slotProps={{ primary: { sx: { fontSize: 14 } } }} />
         </ListItemButton>
       </List>
-      {serviceVersion ? (
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", px: 2, py: 1.5, textAlign: "center" }}
-        >
-          v{serviceVersion}
-        </Typography>
-      ) : null}
     </Box>
   );
 
@@ -169,9 +162,24 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <MenuIcon />
             </IconButton>
           ) : null}
-          <Typography variant="h6" sx={{ whiteSpace: "nowrap", flexGrow: 1, fontSize: 16 }}>
+          <Typography variant="h6" sx={{ whiteSpace: "nowrap", fontSize: 16 }}>
             控制台
           </Typography>
+          {serviceVersion ? (
+            <Chip
+              size="small"
+              label={`v${serviceVersion}`}
+              variant="outlined"
+              sx={{
+                ml: 1.5,
+                height: 20,
+                fontSize: 10,
+                fontFamily: "monospace",
+                opacity: 0.7,
+              }}
+            />
+          ) : null}
+          <Box sx={{ flexGrow: 1 }} />
           <Tooltip title={mode === "dark" ? "切换亮色" : "切换暗色"}>
             <IconButton onClick={toggle} size="small">
               {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}

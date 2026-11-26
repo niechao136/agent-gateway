@@ -117,7 +117,31 @@ def _skill_md(skill, *, strip_scripts: bool) -> str:
         parts = content.split("---", 2)
         if len(parts) >= 3:
             content = parts[2].lstrip("\n")
+
+    # 关键修复：skill_view 路径不注入"按 skill_dir 解析相对路径"的提示，
+    # 模型会把 `scripts/weather.py` 按 HERMES_HOME(/opt/data) 解析成
+    # `/opt/data/scripts/weather.py` → 第一次必然失败。
+    # 用 Hermes 官方模板变量 ${HERMES_SKILL_DIR} 规范化（Hermes 加载时替换为
+    # 该技能绝对目录），作者仍只写相对路径，不把绝对路径写死进内容。
+    content = _rewrite_script_paths(content)
     return f"---\nname: {skill.name}\ndescription: \"{desc}\"\n---\n\n{content}\n"
+
+
+def _rewrite_script_paths(content: str) -> str:
+    """把正文里裸写的 ``scripts/<file>`` 规范化为 Hermes 官方模板变量。
+
+    Hermes 在加载 SKILL.md（含 ``skill_view``）时会把 ``${HERMES_SKILL_DIR}``
+    替换成该技能的绝对目录（``agent/skill_preprocessing.py``），这是上游
+    推荐写法，内置技能都这么写。作者只需写相对路径，平台负责补变量，
+    既不用知道容器路径，也不把绝对路径写死进内容。
+    """
+    import re
+
+    # 已是 ${HERMES_SKILL_DIR}/scripts/... 的不再处理
+    pattern = re.compile(
+        r"(?<!\$\{HERMES_SKILL_DIR\}/)(?<![/\w])(scripts/[A-Za-z0-9_\-./]+\.[A-Za-z0-9]+)"
+    )
+    return pattern.sub(r"${HERMES_SKILL_DIR}/\1", content)
 
 
 def _safe_rel_path(fname: str) -> Path | None:
@@ -190,7 +214,14 @@ def apply_custom_skills(
 
         d = base / name
         d.mkdir(parents=True, exist_ok=True)
-        _atomic_write(d / "SKILL.md", _skill_md(s, strip_scripts=strip_scripts))
+        # Hermes 容器内的 skill 目录绝对路径（/opt/data = profile data root 挂载点）
+        # 用相对定位：hermes_data_root 在容器内是 /opt/hermes-data，
+        # 而 profile 在 Hermes 容器内是 /opt/data/profiles/<name>；两者指向同一宿主目录。
+        skill_dir_in_hermes = f"/opt/data/profiles/{profile}/skills/{name}"
+        _atomic_write(
+            d / "SKILL.md",
+            _skill_md(s, strip_scripts=strip_scripts, skill_dir=skill_dir_in_hermes),
+        )
 
         for fname, fcontent in files.items():
             rel = _safe_rel_path(fname)

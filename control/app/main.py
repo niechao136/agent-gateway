@@ -30,6 +30,7 @@ from .routes import (
     mcp as mcp_routes,
     models as model_routes,
     skills as skill_routes,
+    settings as settings_routes,
     tasks as task_routes,
     toolsets as toolset_routes,
     users,
@@ -143,6 +144,7 @@ app.include_router(model_routes.router)    # /api/models
 app.include_router(a2a_inbound.router)     # /api/a2a/inbound
 app.include_router(a2a_server_routes.router)  # /a2a/{slug} A2A 服务端（对外）
 app.include_router(users.router)           # /api/admin/users
+app.include_router(settings_routes.router) # /api/settings
 app.include_router(chat.router)
 
 

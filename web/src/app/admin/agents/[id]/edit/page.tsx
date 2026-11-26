@@ -39,7 +39,6 @@ import {
   getAgentMCP,
   listA2AEndpoints,
   listAgentAPIKeys,
-  getAgentBuiltinSkillDetail,
   listAgentCuratedSkills,
   listAgentBuiltinSkills,
   listAgentSkillBindings,
@@ -66,11 +65,6 @@ import {
 import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
 import { ConfirmDialog, SkeletonList } from "@/components/Common";
-import InfoIcon from "@mui/icons-material/Info";
-import Dialog from "@mui/material/Dialog";
-import DialogTitle from "@mui/material/DialogTitle";
-import DialogContent from "@mui/material/DialogContent";
-import DialogActions from "@mui/material/DialogActions";
 import { ToolsetGrid } from "@/components/ToolsetGrid";
 
 function EditInner() {
@@ -111,10 +105,6 @@ function EditInner() {
     { name: string; description?: string | null; enabled: boolean; usage?: number }[]
   >([]);
   const [curatorOn, setCuratorOn] = useState(false);
-  const [skillDetail, setSkillDetail] = useState<{
-    name: string;
-    content: string;
-  } | null>(null);
 
   // A2A 绑定
   const [a2aAll, setA2aAll] = useState<A2AEndpoint[]>([]);
@@ -499,7 +489,7 @@ function EditInner() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" },
             gap: 2,
             alignItems: "start",
           }}
@@ -543,17 +533,6 @@ function EditInner() {
                             secondary={bs.description ?? ""}
                             sx={{ flexGrow: 1 }}
                           />
-                          <IconButton
-                            size="small"
-                            onClick={async () => {
-                              const d = await getAgentBuiltinSkillDetail(id, bs.name).catch(
-                                () => null,
-                              );
-                              if (d) setSkillDetail({ name: d.name, content: d.content || "（无正文）" });
-                            }}
-                          >
-                            <InfoIcon fontSize="small" />
-                          </IconButton>
                         </Stack>
                       }
                     />
@@ -604,15 +583,6 @@ function EditInner() {
                         color={c.enabled ? "success" : "default"}
                         label={c.enabled ? "已启用" : "已禁用"}
                       />
-                      <IconButton
-                        size="small"
-                        onClick={async () => {
-                          const d = await getAgentBuiltinSkillDetail(id, c.name).catch(() => null);
-                          if (d) setSkillDetail({ name: d.name, content: d.content || "（无正文）" });
-                        }}
-                      >
-                        <InfoIcon fontSize="small" />
-                      </IconButton>
                     </Stack>
                   ))
                 )}
@@ -932,33 +902,6 @@ function EditInner() {
           </Card>
         </Box>
       ) : null}
-      {/* Skill 详情（内置 / curator 生成） */}
-      <Dialog
-        open={Boolean(skillDetail)}
-        onClose={() => setSkillDetail(null)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle id="skill-detail-title">{skillDetail?.name ?? ""}</DialogTitle>
-        <DialogContent dividers>
-          <Box
-            component="pre"
-            sx={{
-              m: 0,
-              fontFamily: "monospace",
-              fontSize: 12,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {skillDetail?.content ?? ""}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSkillDetail(null)}>关闭</Button>
-        </DialogActions>
-      </Dialog>
-
     </Stack>
   );
 }

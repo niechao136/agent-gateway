@@ -17,6 +17,7 @@ import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import {
   ApiError,
+  getBuiltinSkillDetail,
   getRole,
   listAgents,
   listBuiltinSkills,
@@ -24,7 +25,6 @@ import {
   type Agent,
   type BuiltinSkill,
 } from "@/lib/api";
-import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
 import { EmptyState, SkeletonList } from "@/components/Common";
 
@@ -36,6 +36,7 @@ function BuiltinInner() {
   // 级联确认弹窗
   const [pending, setPending] = useState<{ skill: BuiltinSkill; enabled: boolean } | null>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [detail, setDetail] = useState<{ name: string; content: string } | null>(null);
 
   const isAdmin = getRole() === "admin";
 
@@ -142,12 +143,51 @@ function BuiltinInner() {
                       {s.description || "（无描述）"}
                     </Typography>
                   </Box>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      getBuiltinSkillDetail(s.name)
+                        .then((d) =>
+                          setDetail({ name: d.name, content: d.content || "（无正文）" }),
+                        )
+                        .catch(() => setDetail({ name: s.name, content: "（读取失败）" }))
+                    }
+                  >
+                    详情
+                  </Button>
                 </Stack>
               </CardContent>
             </Card>
           ))}
         </Stack>
       )}
+
+      {/* 内置技能详情 */}
+      <Dialog
+        open={detail !== null}
+        onClose={() => setDetail(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{detail?.name ?? ""}</DialogTitle>
+        <DialogContent dividers>
+          <Box
+            component="pre"
+            sx={{
+              m: 0,
+              fontFamily: "monospace",
+              fontSize: 12,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {detail?.content ?? ""}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetail(null)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 级联禁用确认 */}
       <Dialog open={pending !== null} onClose={() => setPending(null)} maxWidth="xs" fullWidth>
@@ -188,9 +228,7 @@ function BuiltinInner() {
 export default function BuiltinSkillsPage() {
   return (
     <GuardedShell>
-      <AdminShell>
-        <BuiltinInner />
-      </AdminShell>
+      <BuiltinInner />
     </GuardedShell>
   );
 }

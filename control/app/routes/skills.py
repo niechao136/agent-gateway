@@ -95,6 +95,26 @@ async def list_builtin(
     return out
 
 
+@router.get("/builtin/{name}/content")
+async def get_builtin_content(
+    name: str,
+    _: CurrentUser,
+    profile: str | None = None,
+) -> dict:
+    """读取内置技能 SKILL.md 正文（用 default profile，供管理页查看）。"""
+    try:
+        meta = await read_skill(profile or "default", name)
+    except SkillError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    if (meta.get("provenance") or "") != "bundled":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "不是内置技能")
+    return {
+        "name": meta.get("name") or name,
+        "description": meta.get("description"),
+        "content": meta.get("content") or "",
+    }
+
+
 @router.put("/builtin/{name}")
 async def toggle_builtin(
     name: str,

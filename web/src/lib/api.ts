@@ -319,6 +319,12 @@ export async function listAgentBuiltinSkills(
 }
 
 /** 内置 Skill 详情（含 SKILL.md 正文）。 */
+export async function getBuiltinSkillDetail(
+  name: string,
+): Promise<{ name: string; description?: string | null; content: string }> {
+  return request(`/skills/builtin/${encodeURIComponent(name)}/content`);
+}
+
 export async function getAgentBuiltinSkillDetail(
   agentId: number,
   name: string,
@@ -1023,4 +1029,23 @@ export async function getHealth(): Promise<{ status: string; service: string; ve
   const r = await fetch(`/health`, { cache: "no-store" });
   if (!r.ok) return { status: "unknown", service: "agent-gateway", version: "-" };
   return r.json();
+}
+
+
+export interface SystemSetting {
+  key: string;
+  value: unknown;
+  type: string;
+  description: string;
+}
+
+export function listSettings(): Promise<SystemSetting[]> {
+  return request("/settings");
+}
+
+export function updateSettings(values: Record<string, unknown>): Promise<{
+  updated: string[];
+  affected_profiles: number;
+}> {
+  return request("/settings", { method: "PUT", body: JSON.stringify({ values }) });
 }

@@ -29,7 +29,7 @@ async def heal_profiles(session: AsyncSession) -> dict:
     from .hermes import skill_sync
     from .hermes.toolset_forcing import compute_forced, apply_forced_toolsets
 
-    stats = {"agents": 0, "resynced": 0, "errors": 0}
+    stats = {"agents": 0, "resynced": 0, "errors": 0, "toolsets": 0}
     settings = get_settings()
     data_root = settings.hermes_data_root
 
@@ -37,6 +37,16 @@ async def heal_profiles(session: AsyncSession) -> dict:
     for agent in agents:
         stats["agents"] += 1
         try:
+            # 1) 强制工具集自愈：对所有 Agent 生效（不只是绑定了 Skill 的）。
+            # 绑定 A2A 但没绑 Skill 的 Agent（如 person）此前被 `if not bound: continue`
+            # 跳过，导致 a2a 工具集没被自动启用，A2A 调用失效。
+            forced = await compute_forced(agent, session)
+            if forced:
+                apply_forced_toolsets(agent, forced)
+                await session.flush()
+                stats["toolsets"] += 1
+
+            # 2) 自定义 Skill 重新下发：仅对绑定了 Skill 的 Agent 执行。
             bound = (
                 await session.execute(
                     select(CustomSkill)
@@ -50,12 +60,7 @@ async def heal_profiles(session: AsyncSession) -> dict:
             if not bound:
                 continue
 
-            # 先对齐强制工具集（terminal 等），再下发技能，
-            # 否则 skill_sync 会按过期的 disabled_toolsets 剥离脚本。
-            forced = await compute_forced(agent, session)
-            apply_forced_toolsets(agent, forced)
-            await session.flush()
-
+            # terminal 等强制工具集已在上面对齐，skill_sync 不会误剥离脚本。
             skill_sync.apply_custom_skills(
                 agent.profile_name,
                 data_root,
