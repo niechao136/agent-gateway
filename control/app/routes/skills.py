@@ -292,10 +292,11 @@ async def create_skill(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SkillOut:
+    name = _validate_name(body.name)
     exists = (
         await session.execute(
             select(CustomSkill).where(
-                CustomSkill.owner_id == user.id, CustomSkill.name == body.name
+                CustomSkill.owner_id == user.id, CustomSkill.name == name
             )
         )
     ).scalar_one_or_none()
@@ -304,7 +305,7 @@ async def create_skill(
 
     s = CustomSkill(
         owner_id=user.id,
-        name=body.name,
+        name=name,
         display_name=(body.display_name or body.name),
         description=body.description,
         content=body.content,
