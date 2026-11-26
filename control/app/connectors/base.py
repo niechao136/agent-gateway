@@ -14,7 +14,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from ..database import SessionLocal
 from ..hermes import chat_proxy, conversations as conv_svc

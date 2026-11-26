@@ -124,7 +124,10 @@ def _skill_md(skill, *, strip_scripts: bool, skill_dir: str | None = None) -> st
     # 用 Hermes 官方模板变量 ${HERMES_SKILL_DIR} 规范化（Hermes 加载时替换为
     # 该技能绝对目录），作者仍只写相对路径，不把绝对路径写死进内容。
     content = _rewrite_script_paths(content)
-    return f"---\nname: {skill.name}\ndescription: \"{desc}\"\n---\n\n{content}\n"
+    # SKILL.md 的 name 用展示名（可中文，供模型与用户阅读）；
+    # 目录名仍用 ASCII slug（skill_slug），二者解耦。
+    shown = (getattr(skill, "display_name", None) or skill.name or "").replace('"', "'")
+    return f"---\nname: {shown}\ndescription: \"{desc}\"\n---\n\n{content}\n"
 
 
 def _rewrite_script_paths(content: str) -> str:

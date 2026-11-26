@@ -56,7 +56,12 @@ function SkillsInner() {
   const [ok, setOk] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CustomSkill | null>(null);
-  const [form, setForm] = useState({ name: "", description: "", content: TEMPLATE });
+  const [form, setForm] = useState({
+    name: "",
+    display_name: "",
+    description: "",
+    content: TEMPLATE,
+  });
   const [files, setFiles] = useState<SkillFile[]>([]);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -134,7 +139,7 @@ function SkillsInner() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ name: "", description: "", content: TEMPLATE });
+    setForm({ name: "", display_name: "", description: "", content: TEMPLATE });
     setFiles([]);
     setOpen(true);
   }
@@ -143,7 +148,12 @@ function SkillsInner() {
     try {
       const detail = await getSkill(s.id); // 回填正文与文件
       setEditing(s);
-      setForm({ name: s.name, description: s.description ?? "", content: detail.content });
+      setForm({
+        name: s.name,
+        display_name: s.display_name ?? s.name,
+        description: s.description ?? "",
+        content: detail.content,
+      });
       setFiles(
         Object.entries(detail.files ?? {}).map(([path, content]) => ({ path, content })),
       );
@@ -177,7 +187,11 @@ function SkillsInner() {
       if (editing) {
         await updateSkill(editing.id, payload);
       } else {
-        await createSkill({ name: form.name.trim(), ...payload });
+        await createSkill({
+          name: form.name.trim(),
+          display_name: form.display_name.trim() || undefined,
+          ...payload,
+        });
       }
       setOpen(false);
       setOk("已保存并同步到绑定的 Agent profile");
@@ -245,10 +259,19 @@ function SkillsInner() {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <TextField
-              label="名称"
+              label="名称（英文标识）"
               value={form.name}
               disabled={!!editing}
+              required
+              error={!!form.name && !/^[a-z0-9][a-z0-9-_]*$/i.test(form.name)}
+              helperText="仅限英文字母、数字、连字符、下划线；用作目录名与技能标识，创建后不可改"
               onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+            <TextField
+              label="显示名称（可选，支持中文）"
+              value={form.display_name ?? ""}
+              helperText="给人和模型看的名称，留空则与名称相同"
+              onChange={(e) => setForm({ ...form, display_name: e.target.value })}
             />
             <TextField
               label="描述"
@@ -367,7 +390,7 @@ function SkillsInner() {
           <Button onClick={() => setOpen(false)}>取消</Button>
           <Button
             variant="contained"
-            disabled={busy || !form.content.trim() || (!editing && !form.name.trim())}
+            disabled={busy || !form.content.trim() || (!editing && !/^[a-z0-9][a-z0-9-]*$/.test(form.name.trim()))}
             onClick={() => void submit()}
           >
             保存

@@ -54,11 +54,18 @@ class FeishuRunner(ConnectorRunner):
             import lark_oapi as lark
             from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 
-            # 确保 SDK 的模块级 loop 属于本线程
+            # ⚠️ lark_oapi 在「模块导入时」就把当时的事件循环存成模块级全局 loop，
+            # ws.Client.start() 内部用它 run_until_complete。模块被缓存后，这个 loop
+            # 仍指向旧线程的 loop，重连就会报 "This event loop is already running"。
+            # 因此：每次连接都新建 loop，并显式覆盖 SDK 的模块级 loop。
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
             try:
-                asyncio.get_event_loop()
-            except RuntimeError:
-                asyncio.set_event_loop(asyncio.new_event_loop())
+                import lark_oapi.ws.client as _lark_ws_client
+
+                _lark_ws_client.loop = new_loop
+            except Exception:  # noqa: BLE001
+                logger.debug("无法覆盖 lark ws loop（SDK 版本差异）", exc_info=True)
 
             def on_message(data: P2ImMessageReceiveV1) -> None:
                 """SDK 回调（线程内）。转发到事件循环。"""

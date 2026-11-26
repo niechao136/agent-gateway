@@ -254,6 +254,7 @@ export async function updateUser(
 export interface CustomSkill {
   id: number;
   name: string;
+  display_name: string | null;
   owner_id: number;
   description: string | null;
   is_shared: boolean;
@@ -275,6 +276,7 @@ export async function getSkill(id: number): Promise<SkillDetail> {
 
 export async function createSkill(body: {
   name: string;
+  display_name?: string;
   description?: string;
   content: string;
   files?: Record<string, string>;

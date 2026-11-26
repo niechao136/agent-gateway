@@ -118,6 +118,7 @@ export default function SettingsPage() {
                         type="number"
                         size="small"
                         value={String(draft[item.key] ?? "")}
+                        sx={{ width: 140, flexShrink: 0 }}
                         onChange={(e) =>
                           setDraft((d) => ({
                             ...d,
@@ -125,7 +126,7 @@ export default function SettingsPage() {
                           }))
                         }
                         slotProps={{
-                          htmlInput: { min: 0, style: { width: 90, textAlign: "right" } },
+                          htmlInput: { min: 0, style: { textAlign: "right" } },
                         }}
                       />
                     )}

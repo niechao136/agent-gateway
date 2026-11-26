@@ -255,6 +255,8 @@ class CustomSkill(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(64))
+    # 展示名（可中文）；name 限制为 ASCII slug，作为目录名与技能标识。
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # SKILL.md 正文
     content: Mapped[str] = mapped_column(Text)

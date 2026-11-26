@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -179,8 +180,28 @@ async def toggle_builtin(
 
 
 # ── 自定义 Skill CRUD ─────────────────────────────────────
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _validate_name(name: str) -> str:
+    """技能名必须是 ASCII slug（小写字母/数字/下划线/连字符）。
+
+    它同时作为 profile 里的目录名和 Hermes 的技能标识，非 ASCII 会带来
+    路径/locale 问题。中文等展示需求请用 display_name。
+    """
+    v = (name or "").strip()
+    if not _NAME_RE.match(v):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "技能名只能是小写英文字母、数字、下划线或连字符（如 weather-alert）；"
+            "中文请填「显示名称」",
+        )
+    return v
+
+
 class SkillIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=128)
     description: str | None = None
     content: str = Field(min_length=1)
     files: dict[str, str] | None = None
@@ -188,6 +209,7 @@ class SkillIn(BaseModel):
 
 
 class SkillUpdateIn(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)
     description: str | None = None
     content: str | None = None
     files: dict[str, str] | None = None
@@ -197,6 +219,7 @@ class SkillUpdateIn(BaseModel):
 class SkillOut(BaseModel):
     id: int
     name: str
+    display_name: str | None = None
     owner_id: int
     description: str | None
     is_shared: bool
@@ -212,6 +235,7 @@ def _out(s: CustomSkill, bound: list[int] | None = None) -> SkillOut:
     return SkillOut(
         id=s.id,
         name=s.name,
+        display_name=s.display_name,
         owner_id=s.owner_id,
         description=s.description,
         is_shared=s.is_shared,
@@ -281,6 +305,7 @@ async def create_skill(
     s = CustomSkill(
         owner_id=user.id,
         name=body.name,
+        display_name=(body.display_name or body.name),
         description=body.description,
         content=body.content,
         files=body.files,
