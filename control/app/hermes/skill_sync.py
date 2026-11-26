@@ -109,7 +109,7 @@ def _inject_requires_terminal(skill_md: str) -> str:
     return f"---\n{fm}\n---\n{body}"
 
 
-def _skill_md(skill, *, strip_scripts: bool) -> str:
+def _skill_md(skill, *, strip_scripts: bool, skill_dir: str | None = None) -> str:
     desc = (skill.description or "").replace('"', "'")
     content = skill.content or ""
     # 剥离 content 自带的 frontmatter（源 SKILL.md 上传时包含），避免双层 --- 块
