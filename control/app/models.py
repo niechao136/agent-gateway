@@ -64,7 +64,6 @@ class User(Base):
 
 class Agent(Base):
     __tablename__ = "agents"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
@@ -81,6 +80,8 @@ class Agent(Base):
     )
     # v2：toolset_tier 删除，直接存禁用列表（默认 = 只读助手）
     disabled_toolsets: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 该 Agent 是否启用 Hermes curator（技能策展器）。NULL 表示跟随全局默认（关闭）。
+    curator_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -371,6 +372,9 @@ class Connector(Base):
     )
     credentials: Mapped[dict] = mapped_column(JSON)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # 最近一次收到消息的会话 ID（chat_id）。定时任务的 connector 回报用它作为目标，
+    # 否则无法知道往哪个会话发消息。
+    default_chat_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

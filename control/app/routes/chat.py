@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
@@ -207,6 +208,19 @@ def _normalize_messages(raw: list[dict]) -> list[dict]:
         tool_name = m.get("tool_name")
         if isinstance(tool_name, str) and tool_name:
             item["toolName"] = tool_name
+        # 历史里也带上工具调用参数（与实时流一致）
+        for key in ("tool_args", "args", "arguments", "tool_input"):
+            v = m.get(key)
+            if v is None:
+                continue
+            if isinstance(v, str):
+                item["toolArgs"] = v[:1000]
+            else:
+                try:
+                    item["toolArgs"] = json.dumps(v, ensure_ascii=False)[:1000]
+                except (TypeError, ValueError):
+                    item["toolArgs"] = str(v)[:1000]
+            break
         out.append(item)
     return out
 

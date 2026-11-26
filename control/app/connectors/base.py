@@ -137,6 +137,12 @@ class ConnectorRunner(ABC):
         self.status.messages_in += 1
         cid = self.connector.id
 
+        # 记录最近会话，供定时任务的 connector 回报定位目标 chat。
+        try:
+            self.connector.default_chat_id = chat_id
+        except Exception:  # 只读对象等异常不影响主流程
+            pass
+
         def session_title() -> str:
             return f"[{self.platform}:{cid}:{chat_id}]"
 
@@ -147,6 +153,18 @@ class ConnectorRunner(ABC):
             if agent is None:
                 logger.error("连接器 %s 绑定的 Agent 不存在", cid)
                 return
+
+            # 持久化最近会话：定时任务的 connector 回报需要它作为发送目标。
+            try:
+                await session.execute(
+                    update(Connector)
+                    .where(Connector.id == cid)
+                    .values(default_chat_id=chat_id)
+                )
+                await session.commit()
+            except Exception as exc:  # 记录失败不应阻断消息处理
+                logger.warning("记录连接器 %s 默认会话失败: %s", cid, exc)
+                await session.rollback()
 
             # 用平台/chat 作为 title 前缀，便于检索；session id 完全交给 hermes 生成，
             # 不能手动覆盖——否则 DB 存的 sid 与 hermes 里的不一致，查历史必然 404。

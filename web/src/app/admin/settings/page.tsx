@@ -11,6 +11,7 @@ import {
   CircularProgress,
   Stack,
   Switch,
+  TextField,
   Typography,
 } from "@mui/material";
 import { AdminShell } from "@/components/AdminShell";
@@ -113,8 +114,9 @@ export default function SettingsPage() {
                         }
                       />
                     ) : (
-                      <input
+                      <TextField
                         type="number"
+                        size="small"
                         value={String(draft[item.key] ?? "")}
                         onChange={(e) =>
                           setDraft((d) => ({
@@ -122,6 +124,9 @@ export default function SettingsPage() {
                             [item.key]: Number(e.target.value),
                           }))
                         }
+                        slotProps={{
+                          htmlInput: { min: 0, style: { width: 90, textAlign: "right" } },
+                        }}
                       />
                     )}
                   </Stack>

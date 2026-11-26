@@ -52,6 +52,7 @@ class AgentUpdateIn(BaseModel):
     model: str | None = None
     provider: str | None = None
     disabled_toolsets: list[str] | None = None
+    curator_enabled: bool | None = None
     status: AgentStatus | None = None
 
 
@@ -64,6 +65,7 @@ class AgentOut(BaseModel):
     owner_id: int
     status: str
     disabled_toolsets: list[str] = []
+    curator_enabled: bool | None = None
 
     model_config = {"from_attributes": True}
 
@@ -192,6 +194,8 @@ async def update_agent(
         agent.status = body.status
     if body.disabled_toolsets is not None:
         agent.disabled_toolsets = normalize_disabled(body.disabled_toolsets)
+    if body.curator_enabled is not None:
+        agent.curator_enabled = body.curator_enabled
 
     try:
         await prov.sync_agent_profile(

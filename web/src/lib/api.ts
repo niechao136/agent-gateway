@@ -667,19 +667,59 @@ export async function testConnector(id: number): Promise<Record<string, unknown>
   return request(`/connectors/${id}/test`, { method: "POST" });
 }
 
-/** SSE 订阅连接器状态变更（批次 4 决策：SSE 推送）。 */
+/**
+ * SSE 订阅连接器状态变更（批次 4 决策：SSE 推送）。
+ *
+ * 用 fetch + ReadableStream 而非 EventSource：EventSource 无法带 Authorization 头，
+ * 会导致后端报「未提供凭证」。这里与 streamChat 保持同一套鉴权方式。
+ */
 export function subscribeConnectorStatus(
   onMessage: (connectors: Connector[]) => void,
 ): () => void {
-  const es = new EventSource(`${API_BASE}/connectors/events`, { withCredentials: false });
-  es.onmessage = (ev) => {
+  const ctrl = new AbortController();
+  const token = localStorage.getItem("ag_token");
+
+  void (async () => {
     try {
-      onMessage(JSON.parse(ev.data));
+      const res = await fetch(`${API_BASE}/connectors/events`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: ctrl.signal,
+      });
+      if (!res.ok || !res.body) return;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // 以空行分帧
+        let idx = buf.indexOf("\n\n");
+        while (idx !== -1) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = raw
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).trim())
+            .join("");
+          if (dataLine) {
+            try {
+              onMessage(JSON.parse(dataLine));
+            } catch {
+              /* 忽略坏帧 */
+            }
+          }
+          idx = buf.indexOf("\n\n");
+        }
+      }
     } catch {
-      /* 忽略坏帧 */
+      /* 组件卸载或网络中断 */
     }
-  };
-  return () => es.close();
+  })();
+
+  return () => ctrl.abort();
 }
 
 // ── Agent API Key（批次 3）───────────────────────────────

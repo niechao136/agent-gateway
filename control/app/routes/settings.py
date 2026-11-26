@@ -27,11 +27,6 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # 可在管理界面查看/修改的配置项：(key, 类型, 说明, 是否敏感)
 MANAGED: dict[str, tuple[type, str, bool]] = {
-    "curator_enabled": (
-        bool,
-        "Hermes 技能策展器：自动把成功经验沉淀为技能。开启可能与平台自定义 Skill 语义冲突。",
-        False,
-    ),
     "self_heal_on_start": (
         bool,
         "启动时自动对齐存量 profile（技能目录名/脚本/强制工具集/影子技能）。幂等。",

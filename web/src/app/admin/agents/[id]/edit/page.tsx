@@ -8,6 +8,7 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Switch from "@mui/material/Switch";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
@@ -182,6 +183,7 @@ function EditInner() {
         name: name.trim(),
         description: description.trim(),
         disabled_toolsets: disabledToolsets,
+        curator_enabled: curatorOn,
         ...(soul.trim() ? { soul: soul.trim() } : {}),
       });
       setOk("已保存");
@@ -553,7 +555,12 @@ function EditInner() {
                   <Chip
                     size="small"
                     color={curatorOn ? "success" : "default"}
-                    label={curatorOn ? "curator 已开启" : "curator 已关闭"}
+                    label={curatorOn ? "已开启" : "已关闭"}
+                  />
+                  <Switch
+                    size="small"
+                    checked={curatorOn}
+                    onChange={(e) => setCuratorOn(e.target.checked)}
                   />
                 </Stack>
                 <Typography variant="caption" color="text.secondary">

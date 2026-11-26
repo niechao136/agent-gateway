@@ -15,8 +15,8 @@
 
 export type ChatEvent =
   | { type: "token"; content: string }
-  | { type: "tool_start"; name: string }
-  | { type: "tool_end"; name: string; output: string }
+  | { type: "tool_start"; name: string; args?: string }
+  | { type: "tool_end"; name: string; output: string; args?: string }
   | { type: "interrupt"; question: string }
   | { type: "done"; thread_id: string }
   | { type: "error"; detail: string };
@@ -61,10 +61,21 @@ function toChatEvent(event: string | null, raw: string): ChatEvent | null {
     case "token":
       return typeof obj.content === "string" ? { type: "token", content: obj.content } : null;
     case "tool_start":
-      return typeof obj.name === "string" ? { type: "tool_start", name: obj.name } : null;
+      return typeof obj.name === "string"
+        ? {
+            type: "tool_start",
+            name: obj.name,
+            args: typeof obj.args === "string" ? obj.args : undefined,
+          }
+        : null;
     case "tool_end":
       return typeof obj.name === "string"
-        ? { type: "tool_end", name: obj.name, output: String(obj.output ?? "") }
+        ? {
+            type: "tool_end",
+            name: obj.name,
+            output: String(obj.output ?? ""),
+            args: typeof obj.args === "string" ? obj.args : undefined,
+          }
         : null;
     case "interrupt":
       return typeof obj.question === "string"

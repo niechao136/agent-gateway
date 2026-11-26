@@ -104,6 +104,24 @@ def _chunk_text(obj: dict) -> str | None:
     return content if isinstance(content, str) and content else None
 
 
+def _tool_args(obj: dict) -> str | None:
+    """从工具事件里提取调用参数，供前端展示（截断避免过大）。"""
+    raw = obj.get("args") or obj.get("arguments") or obj.get("input")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw
+    else:
+        try:
+            s = json.dumps(raw, ensure_ascii=False)
+        except (TypeError, ValueError):
+            s = str(raw)
+    s = s.strip()
+    if not s or s in ("{}", "null"):
+        return None
+    return s[:1000]
+
+
 def _tool_event(obj: dict, event_name: str | None) -> tuple[str, str | None] | None:
     """识别工具进度事件，返回 (name, output_or_None)。
 
@@ -130,6 +148,25 @@ def _tool_event(obj: dict, event_name: str | None) -> tuple[str, str | None] | N
     # tool.progress 的中间态：当作 start（前端显示"正在调用"）。
     # delta 是进度提示（如 "searching"）而非工具结果，不回填到 output。
     return name, None
+
+
+def _tool_args(obj: dict) -> str:
+    """从工具事件里提取调用参数，返回精简字符串（供前端展示）。"""
+    for key in ("args", "arguments", "tool_args", "input", "parameters"):
+        v = obj.get(key)
+        if v is None:
+            continue
+        if isinstance(v, str):
+            return v[:1000]
+        try:
+            return json.dumps(v, ensure_ascii=False)[:1000]
+        except (TypeError, ValueError):
+            return str(v)[:1000]
+    # 有些事件把参数放在 preview 里
+    pv = obj.get("preview")
+    if isinstance(pv, str) and pv:
+        return pv[:1000]
+    return ""
 
 
 async def translate_stream(
@@ -179,14 +216,24 @@ async def translate_stream(
                     te = _tool_event(obj, event_name)
                     if te:
                         name, output = te
+                        targs = _tool_args(obj)
                         if output is None or output == "":
                             # progress / completed 都不带真实输出：去重后保持 running，
-                            # 等 run.completed 的 tool messages 按 tool_name 回填
+                            # 等 run.completed 的 tool messages 按 tool_name 回填。
+                            # 但若本事件带了参数，先补发给前端（让用户看到在调什么）。
                             if name not in pending_tools:
                                 pending_tools.append(name)
-                                yield sse("tool_start", {"name": name})
+                                payload: dict = {"name": name}
+                                if targs:
+                                    payload["args"] = targs
+                                yield sse("tool_start", payload)
+                            elif targs:
+                                yield sse("tool_args", {"name": name, "args": targs})
                         else:
-                            yield sse("tool_end", {"name": name, "output": output})
+                            payload = {"name": name, "output": output}
+                            if targs:
+                                payload["args"] = targs
+                            yield sse("tool_end", payload)
                         continue
 
                 # ── 增量文本（assistant.delta）──

@@ -53,6 +53,27 @@ function ToolCallBlock({ message }: { message: ChatMessage }) {
           sx={{ cursor: "pointer" }}
         />
       </StackRow>
+      {expanded && message.toolArgs ? (
+        <Box
+          component="pre"
+          sx={{
+            m: 0,
+            mt: 0.75,
+            p: 1,
+            maxHeight: 120,
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            bgcolor: "action.selected",
+            borderRadius: 1,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 11,
+            opacity: 0.85,
+          }}
+        >
+          {`参数: ${message.toolArgs}`}
+        </Box>
+      ) : null}
       {text && expanded ? (
         <Box
           component="pre"

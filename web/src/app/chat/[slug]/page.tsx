@@ -163,17 +163,21 @@ function ChatView() {
             // 每个 tool 事件分配唯一序号，避免同名工具多次调用时回填错位
             toolSeqRef.current += 1;
             const seq = toolSeqRef.current;
-            setMessages((m) => [
-              ...m,
-              {
+            setMessages((m) => {
+              // 工具步骤插到「助手回答」之前，保证视觉顺序：用户 → 工具 → 结论
+              const idx = m.findIndex((x) => x.id === assistantId);
+              const toolMsg: ChatMessage = {
                 id: `t-${seq}`,
                 role: "tool",
                 toolName: ev.name,
+                toolArgs: ev.args,
                 toolSeq: seq,
                 toolStatus: "running",
                 content: "",
-              },
-            ]);
+              };
+              if (idx === -1) return [...m, toolMsg];
+              return [...m.slice(0, idx), toolMsg, ...m.slice(idx)];
+            });
           } else if (ev.type === "tool_end") {
             setMessages((m) => {
               // 按 name + running 状态匹配最早的一条（FIFO），精确回填
@@ -184,7 +188,12 @@ function ChatView() {
                   m[i].toolStatus === "running"
                 ) {
                   const copy = [...m];
-                  copy[i] = { ...copy[i], content: ev.output, toolStatus: "done" };
+                  copy[i] = {
+                    ...copy[i],
+                    content: ev.output,
+                    toolArgs: ev.args || copy[i].toolArgs,
+                    toolStatus: "done",
+                  };
                   return copy;
                 }
               }

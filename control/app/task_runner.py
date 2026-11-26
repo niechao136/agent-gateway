@@ -87,8 +87,14 @@ async def _run_action(
             "method": "message/send",
             "params": {"message": {"role": "user", "parts": [{"kind": "text", "text": task.payload}]}},
         }
+        # 内部端点存的是相对路径（/a2a/<slug>），httpx 需要绝对 URL。
+        from .hermes.a2a import _absolute_a2a_url
+
+        target = _absolute_a2a_url(ep.url)
+        if not target:
+            raise RuntimeError("A2A 端点 URL 为空，且未配置 PUBLIC_BASE_URL")
         async with httpx.AsyncClient(timeout=ep.timeout or 120) as c:
-            r = await c.post(ep.url, json=body, headers=headers)
+            r = await c.post(target, json=body, headers=headers)
             r.raise_for_status()
             data = r.json()
         return json.dumps(data.get("result", data), ensure_ascii=False)[:4000]
@@ -139,13 +145,28 @@ async def _deliver(
                     )
                 ).scalar_one_or_none()
                 if c is not None:
-                    # 通过连接器的 runner 回发（若在线）
                     from .connectors.base import registry
 
-                    runner = registry._runners.get(c.id)
-                    if runner is not None:
-                        await runner.send("schedule", f"【{task.name}】{result}")
-                        done.append("connector")
+                    # 目标会话：用连接器记录的最近会话（收到过消息才有）。
+                    target_chat = c.default_chat_id or ""
+                    if not target_chat:
+                        logger.warning(
+                            "任务 %s 的 connector 回报跳过：连接器 %s 尚无已知会话"
+                            "（需先在该连接器收到一条消息）",
+                            task.name,
+                            c.id,
+                        )
+                    elif not c.enabled:
+                        logger.warning("任务 %s 的 connector 回报跳过：连接器 %s 未启用", task.name, c.id)
+                    else:
+                        runner = registry._runners.get(c.id)
+                        if runner is None:
+                            logger.warning(
+                                "任务 %s 的 connector 回报跳过：连接器 %s 未运行", task.name, c.id
+                            )
+                        else:
+                            await runner.send_with_retry(target_chat, f"【{task.name}】{result}")
+                            done.append("connector")
             elif ch == "knowledge":
                 kb = (
                     await session.execute(

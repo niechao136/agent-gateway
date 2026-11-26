@@ -25,6 +25,7 @@ import {
   type Agent,
   type BuiltinSkill,
 } from "@/lib/api";
+import { AdminShell } from "@/components/AdminShell";
 import { GuardedShell } from "@/lib/authGuard";
 import { EmptyState, SkeletonList } from "@/components/Common";
 
@@ -228,7 +229,9 @@ function BuiltinInner() {
 export default function BuiltinSkillsPage() {
   return (
     <GuardedShell>
-      <BuiltinInner />
+      <AdminShell>
+        <BuiltinInner />
+      </AdminShell>
     </GuardedShell>
   );
 }
