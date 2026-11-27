@@ -32,6 +32,70 @@ logger = logging.getLogger(__name__)
 DELIVERY_CHOICES = ("session", "log", "webhook", "connector", "knowledge")
 
 
+def _extract_a2a_text(data: dict) -> str:
+    """从 A2A JSON-RPC 响应中提取纯文本回复。
+
+    A2A `message/send` 返回的是完整 JSON-RPC 信封：::
+
+        {"id": "...", "contextId": "...", "status": {"state": "completed"},
+         "artifacts": [{"parts": [{"kind": "text", "text": "真正回答"}]}]}
+
+    直接 json.dumps 整个信封会把协议字段一起发给连接器/日志，
+    用户体验差。这里只拼接 ``artifacts[].parts[].text``，并做多级兜底。
+    """
+    result = data.get("result", data) if isinstance(data, dict) else data
+    if not isinstance(result, dict):
+        return str(result)
+
+    texts: list[str] = []
+    for artifact in result.get("artifacts") or []:
+        if not isinstance(artifact, dict):
+            continue
+        for part in artifact.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            txt = part.get("text")
+            if txt:
+                texts.append(str(txt))
+    if texts:
+        return "\n".join(texts).strip()[:4000]
+
+    # 兜底 1：status.message.parts（部分实现把最终回复放在 status 里）
+    status = result.get("status")
+    if isinstance(status, dict):
+        msg = status.get("message")
+        if isinstance(msg, dict):
+            for part in msg.get("parts") or []:
+                if isinstance(part, dict) and part.get("text"):
+                    texts.append(str(part["text"]))
+    if texts:
+        return "\n".join(texts).strip()[:4000]
+
+    # 兜底 2：任务失败时给可读错误，而不是整坨 JSON
+    if isinstance(status, dict):
+        state = status.get("state")
+        if state and state != "completed":
+            msg = status.get("message") or ""
+            return f"A2A 调用未完成（state={state}）：{msg}"[:4000]
+
+    return json.dumps(result, ensure_ascii=False)[:4000]
+
+
+def _detach_task(task: ScheduledTask):
+    """把 ORM 对象的常用字段拍成脱离 session 的轻量对象。
+
+    耗时阶段（Agent 流式对话 / A2A HTTP / webhook）不持有 DB session，
+    _run_action / _deliver 靠本函数提供的简单属性安全读取配置。
+    """
+    from types import SimpleNamespace
+
+    fields = (
+        "id name action_type target_agent_id payload a2a_endpoint_id "
+        "delivery webhook_url connector_id knowledge_id enabled"
+    ).split()
+    return SimpleNamespace(**{f: getattr(task, f, None) for f in fields})
+
+
 def _due(task: ScheduledTask, now: datetime) -> bool:
     if task.last_run_at is None:
         # 新建任务：首次执行延后一个周期，避免创建即触发
@@ -64,23 +128,33 @@ def _compute_next(task: ScheduledTask, now: datetime) -> datetime:
     return now + timedelta(seconds=max(1, task.every_seconds))
 
 
-async def _run_action(
-    session: AsyncSession, task: ScheduledTask, settings
-) -> str:
-    """执行动作，返回文本结果摘要（供各 delivery 复用）。"""
+async def _run_action(task: ScheduledTask, settings) -> str:
+    """执行动作，返回文本结果摘要（供各 delivery 复用）。
+
+    耗时阶段（Agent 流式对话 / A2A HTTP）绝不持有 DB session：
+    本函数自己开短 session 取完配置就关闭，避免占住连接池导致
+    并发的 /run 请求在 get_session() 处排队（表现为"卡 10 秒"）。
+    """
+    factory: async_sessionmaker[AsyncSession] = get_session_factory()
     if task.action_type == "a2a_call":
-        ep = (
-            await session.execute(
-                select(A2AOutboundEndpoint).where(
-                    A2AOutboundEndpoint.id == task.a2a_endpoint_id
+        async with factory() as session:
+            ep = (
+                await session.execute(
+                    select(A2AOutboundEndpoint).where(
+                        A2AOutboundEndpoint.id == task.a2a_endpoint_id
+                    )
                 )
+            ).scalar_one_or_none()
+            ep_data = (
+                dict(url=ep.url, token=ep.token, timeout=ep.timeout)
+                if ep is not None
+                else None
             )
-        ).scalar_one_or_none()
-        if ep is None:
+        if ep_data is None:
             raise RuntimeError("A2A 端点不存在")
         headers = {"Content-Type": "application/json"}
-        if ep.token:
-            headers["Authorization"] = "Bearer " + ep.token
+        if ep_data["token"]:
+            headers["Authorization"] = "Bearer " + ep_data["token"]
         body = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -90,37 +164,37 @@ async def _run_action(
         # 内部端点存的是相对路径（/a2a/<slug>），httpx 需要绝对 URL。
         from .hermes.a2a import _absolute_a2a_url
 
-        target = _absolute_a2a_url(ep.url)
+        target = _absolute_a2a_url(ep_data["url"])
         if not target:
             raise RuntimeError("A2A 端点 URL 为空，且未配置 PUBLIC_BASE_URL")
-        async with httpx.AsyncClient(timeout=ep.timeout or 120) as c:
+        async with httpx.AsyncClient(timeout=ep_data["timeout"] or 120) as c:
             r = await c.post(target, json=body, headers=headers)
             r.raise_for_status()
             data = r.json()
-        return json.dumps(data.get("result", data), ensure_ascii=False)[:4000]
+        return _extract_a2a_text(data)
 
     # agent_message：走控制层对话链路，产生真实会话
-    agent = (
-        await session.execute(select(Agent).where(Agent.id == task.target_agent_id))
-    ).scalar_one_or_none()
-    if agent is None:
-        raise RuntimeError("目标 Agent 不存在")
-    conv = await conv_svc.create_conversation_for_agent(
-        session, agent=agent, source="schedule"
-    )
-    await session.flush()
+    # 只在短 session 里建会话，随后流式对话不占连接池
+    async with factory() as session:
+        agent = (
+            await session.execute(select(Agent).where(Agent.id == task.target_agent_id))
+        ).scalar_one_or_none()
+        if agent is None:
+            raise RuntimeError("目标 Agent 不存在")
+        conv = await conv_svc.create_conversation_for_agent(
+            session, agent=agent, source="schedule"
+        )
+        await session.commit()
+        sid = conv.hermes_session_id
+        profile = agent.profile_name
     chunks: list[str] = []
     async with gw_mod.GatewayClient() as gw:
         # 必须先经 chat_proxy.translate_stream 翻译：hermes 原始帧是
         # assistant.delta / run.completed 等，extract_text_and_usage 只认
         # 翻译后的 token 事件。直接喂原始帧会永远提取到空字符串，
         # 导致连接器/日志/知识库收到的结果全空（只剩任务名）。
-        raw = gw.chat_stream(
-            conv.hermes_session_id, task.payload, profile=agent.profile_name
-        )
-        async for frame in chat_proxy.translate_stream(
-            raw, thread_id=conv.hermes_session_id
-        ):
+        raw = gw.chat_stream(sid, task.payload, profile=profile)
+        async for frame in chat_proxy.translate_stream(raw, thread_id=sid):
             text, _ = chat_proxy.extract_text_and_usage(frame)
             if text:
                 chunks.append(text)
@@ -129,16 +203,19 @@ async def _run_action(
         logger.warning(
             "任务 %s 的 Agent 回复为空（session=%s），请检查模型与 profile 配置",
             task.id,
-            conv.hermes_session_id,
+            sid,
         )
         result = "（Agent 未返回内容）"
     return result[:4000]
 
 
-async def _deliver(
-    session: AsyncSession, task: ScheduledTask, result: str, settings
-) -> list[str]:
-    """按 delivery 多选处理执行结果，返回实际完成的渠道列表。"""
+async def _deliver(task: ScheduledTask, result: str, settings) -> list[str]:
+    """按 delivery 多选处理执行结果，返回实际完成的渠道列表。
+
+    同样自己管理短 session：DB 查询用完即关，网络投递（webhook/连接器）
+    不占连接池。
+    """
+    factory: async_sessionmaker[AsyncSession] = get_session_factory()
     channels = [x.strip() for x in (task.delivery or "log").split(",") if x.strip()]
     done: list[str] = []
     for ch in channels:
@@ -154,55 +231,69 @@ async def _deliver(
                         )
                     done.append("webhook")
             elif ch == "connector":
-                c = (
-                    await session.execute(
-                        select(Connector).where(Connector.id == task.connector_id)
+                async with factory() as session:
+                    c = (
+                        await session.execute(
+                            select(Connector).where(Connector.id == task.connector_id)
+                        )
+                    ).scalar_one_or_none()
+                    c_data = (
+                        dict(id=c.id, default_chat_id=c.default_chat_id, enabled=c.enabled)
+                        if c is not None
+                        else None
                     )
-                ).scalar_one_or_none()
-                if c is not None:
+                if c_data is not None:
                     from .connectors.base import registry
 
                     # 目标会话：用连接器记录的最近会话（收到过消息才有）。
-                    target_chat = c.default_chat_id or ""
+                    target_chat = c_data["default_chat_id"] or ""
                     if not target_chat:
                         logger.warning(
                             "任务 %s 的 connector 回报跳过：连接器 %s 尚无已知会话"
                             "（需先在该连接器收到一条消息）",
                             task.name,
-                            c.id,
+                            c_data["id"],
                         )
-                    elif not c.enabled:
-                        logger.warning("任务 %s 的 connector 回报跳过：连接器 %s 未启用", task.name, c.id)
+                    elif not c_data["enabled"]:
+                        logger.warning("任务 %s 的 connector 回报跳过：连接器 %s 未启用", task.name, c_data["id"])
                     else:
-                        runner = registry._runners.get(c.id)
+                        runner = registry._runners.get(c_data["id"])
                         if runner is None:
                             logger.warning(
-                                "任务 %s 的 connector 回报跳过：连接器 %s 未运行", task.name, c.id
+                                "任务 %s 的 connector 回报跳过：连接器 %s 未运行", task.name, c_data["id"]
                             )
                         else:
                             await runner.send_with_retry(target_chat, f"【{task.name}】{result}")
                             done.append("connector")
             elif ch == "knowledge":
-                kb = (
-                    await session.execute(
-                        select(KnowledgeBase).where(KnowledgeBase.id == task.knowledge_id)
-                    )
-                ).scalar_one_or_none()
-                if kb is not None:
-                    from .hermes import ragflow_ingest
-                    from .models import RagflowSite
-
-                    site = (
+                async with factory() as session:
+                    kb = (
                         await session.execute(
-                            select(RagflowSite).where(RagflowSite.id == kb.site_id)
+                            select(KnowledgeBase).where(KnowledgeBase.id == task.knowledge_id)
                         )
                     ).scalar_one_or_none()
-                    if site is not None:
-                        await ragflow_ingest.ingest_text(
-                            kb, f"{task.name}\n{result}",
-                            base_url=site.base_url, api_key=site.api_key,
+                    if kb is not None:
+                        from .models import RagflowSite
+
+                        site = (
+                            await session.execute(
+                                select(RagflowSite).where(RagflowSite.id == kb.site_id)
+                            )
+                        ).scalar_one_or_none()
+                        kb_data = dict(id=kb.id, name=kb.name, site_id=kb.site_id)
+                        site_data = (
+                            dict(base_url=site.base_url, api_key=site.api_key)
+                            if site is not None else None
                         )
-                        done.append("knowledge")
+                if site_data is not None:
+                    from types import SimpleNamespace
+                    from .hermes import ragflow_ingest
+
+                    await ragflow_ingest.ingest_text(
+                        SimpleNamespace(**kb_data), f"{task.name}\n{result}",
+                        base_url=site_data["base_url"], api_key=site_data["api_key"],
+                    )
+                    done.append("knowledge")
             elif ch == "session":
                 # 会话由 agent_message 动作天然产生；a2a_call 则记录到 run 摘要
                 done.append("session")
@@ -234,10 +325,17 @@ async def create_run(task_id: int) -> int:
 
 
 async def execute_run(run_id: int, task_id: int) -> None:
-    """执行一个已排队的 TaskRun（后台任务入口）。"""
+    """执行一个已排队的 TaskRun（后台任务入口）。
+
+    关键：DB session 只在「读配置 / 写状态」这几步短暂持有，
+    Agent 对话这种耗时操作绝不占用连接池——否则并发的 /run 请求
+    会在 get_session() 处排队等待，表现为接口"卡 10 秒"。
+    """
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
     settings = get_settings()
     now = datetime.now(UTC)
+
+    # 短事务 1：标记 running
     async with factory() as session:
         run = (await session.execute(select(TaskRun).where(TaskRun.id == run_id))).scalar_one_or_none()
         task = (
@@ -249,21 +347,46 @@ async def execute_run(run_id: int, task_id: int) -> None:
         run.status = "running"
         run.started_at = now
         await session.commit()
-        try:
-            result = await _run_action(session, task, settings)
-            delivered = await _deliver(session, task, result, settings)
-            run.status = "ok"
-            run.result = result
-            run.summary = result[:200]
-            run.delivered = ",".join(delivered)
-            task.last_status = "ok"
-        except Exception as exc:
-            run.status = "error"
-            run.summary = str(exc)[:300]
-            task.last_status = "error"
-            logger.exception("执行任务 %s 失败", task_id)
-        task.last_run_at = now
-        task.next_run_at = _compute_next(task, now)
+
+    # 耗时阶段：不持有任何 DB session
+    result = ""
+    delivered: list[str] = []
+    status = "ok"
+    summary = ""
+    try:
+        async with factory() as session:
+            task = (
+                await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+            ).scalar_one_or_none()
+            if task is None:
+                raise RuntimeError("任务不存在")
+            # 分离 ORM 对象：_run_action/_deliver 自己开短 session，
+            # 这里先把需要的标量字段取出来，避免在耗时阶段持有外部 session。
+            task_data = _detach_task(task)
+        result = await _run_action(task_data, settings)
+        delivered = await _deliver(task_data, result, settings)
+        summary = result[:200]
+    except Exception as exc:
+        status = "error"
+        summary = str(exc)[:300]
+        logger.exception("执行任务 %s 失败", task_id)
+
+    # 短事务 2：写回最终结果
+    async with factory() as session:
+        run = (await session.execute(select(TaskRun).where(TaskRun.id == run_id))).scalar_one_or_none()
+        task = (
+            await session.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        ).scalar_one_or_none()
+        if run is None:
+            return
+        run.status = status
+        run.result = result
+        run.summary = summary
+        run.delivered = ",".join(delivered)
+        if task is not None:
+            task.last_status = status
+            task.last_run_at = now
+            task.next_run_at = _compute_next(task, now)
         await session.commit()
 
 
@@ -287,6 +410,8 @@ async def run_due_tasks(limit: int = 20) -> int:
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
     now = datetime.now(UTC)
     ran = 0
+    due_ids: list[int] = []
+    # 阶段 1：只在短事务里扫描到期任务并更新调度字段，立即释放 session。
     async with factory() as session:
         tasks = (
             (
@@ -298,30 +423,20 @@ async def run_due_tasks(limit: int = 20) -> int:
             .all()
         )
         for task in tasks:
-            if ran >= limit:
+            if len(due_ids) >= limit:
                 break
             task.last_run_at = task.last_run_at or now  # 首次扫描只初始化，不触发
             if not _due(task, now):
-                await session.commit()
                 continue
-            run = TaskRun(task_id=task.id, status="running")
-            session.add(run)
-            await session.flush()
-            try:
-                result = await _run_action(session, task, settings)
-                delivered = await _deliver(session, task, result, settings)
-                run.status = "ok"
-                run.result = result
-                run.summary = result[:200]
-                run.delivered = ",".join(delivered)
-                task.last_status = "ok"
-            except Exception as exc:
-                run.status = "error"
-                run.summary = str(exc)[:300]
-                task.last_status = "error"
-                logger.exception("定时任务 %s 执行失败", task.id)
+            due_ids.append(task.id)
             task.last_run_at = now
             task.next_run_at = _compute_next(task, now)
-            ran += 1
-            await session.commit()
+        await session.commit()
+    # 阶段 2：session 已释放，再排队执行，避免与 create_run/execute_run 争连接。
+    import asyncio
+
+    for task_id in due_ids:
+        run_id = await create_run(task_id)
+        asyncio.create_task(execute_run(run_id, task_id))
+        ran += 1
     return ran

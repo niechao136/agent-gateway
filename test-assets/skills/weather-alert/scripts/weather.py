@@ -112,11 +112,16 @@ def main() -> None:
             "wind_kmh": current.get("windspeedKmph"),
             "precip_mm": current.get("precipMM"),
         }
-        # 查询名与返回地名明显不符时给出提示，避免模型误以为是目标城市。
-        if not mapped and all(ord(ch) >= 128 for ch in raw.strip()):
+        # wttr.in 会用历史/别名地名：昆山 → Yushan / Luoxiang，
+        # 这是同一城市的规范名，不是"查错了"。明确标注，避免模型反复重试。
+        aliases = {"yushan", "luoxiang"}
+        if resolved.lower() in aliases and raw.strip() in ("昆山", "Kunshan", "Kunshan, China", "Kunshan, Jiangsu"):
+            result["alias_of"] = raw.strip()
+            result["city"] = f"{raw.strip()}（数据源名称：{resolved}）"
+        elif not mapped and all(ord(ch) >= 128 for ch in raw.strip()):
             result["warning"] = (
                 f"'{raw}' 未在内置城市表中，wttr.in 返回的是 '{resolved}'。"
-                "如不符请改用拼音（如 Kunshan）重试一次。"
+                "这通常是同一地点的别名；无需重试，直接按返回数据回答即可。"
             )
         print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:

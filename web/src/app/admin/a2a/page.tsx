@@ -5,6 +5,7 @@ import Accordion from "@mui/material/Accordion";
 import AccordionDetails from "@mui/material/AccordionDetails";
 import AccordionSummary from "@mui/material/AccordionSummary";
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -29,6 +30,7 @@ import {
   createA2AEndpoint,
   deleteA2AEndpoint,
   getA2AInbound,
+  getAgentCard,
   listA2AEndpoints,
   listPublishedAgents,
   pingA2AInbound,
@@ -78,6 +80,8 @@ function A2aInner() {
   const [form, setForm] = useState<Form>(EMPTY);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [cardFor, setCardFor] = useState<string | null>(null);
+  const [cardJson, setCardJson] = useState<string>("");
 
   const load = useCallback(async () => {
     try {
@@ -102,6 +106,19 @@ function A2aInner() {
     setEditing(null);
     setForm(EMPTY);
     setDialogOpen(true);
+  }
+
+  async function showCard(slug: string) {
+    setCardFor(slug);
+    setCardJson("");
+    setError(null);
+    try {
+      const card = await getAgentCard(slug);
+      setCardJson(JSON.stringify(card, null, 2));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "获取 Agent Card 失败");
+      setCardFor(null);
+    }
   }
 
   async function testEndpoint(e: A2AEndpoint) {
@@ -209,6 +226,36 @@ function A2aInner() {
                 ))}
             </Stack>
           )}
+        </CardContent>
+      </Card>
+
+      {/* 1b. 已发布 Agent 的 Card JSON —— 供其他平台发现本 Agent */}
+      <Card>
+        <CardContent>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>
+            Agent Card（供其他平台发现）
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            只有「已发布」的 Agent 才有对外的 Agent Card。点击查看 JSON，
+            其他平台可通过 <code>/a2a/&lt;slug&gt;/.well-known/agent-card.json</code> 获取。
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+            {agents.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                暂无已发布的 Agent。
+              </Typography>
+            ) : (
+              agents.map((a) => (
+                <Chip
+                  key={a.id}
+                  size="small"
+                  variant="outlined"
+                  label={`查看 ${a.name} 的 Card`}
+                  onClick={() => void showCard(a.slug)}
+                />
+              ))
+            )}
+          </Stack>
         </CardContent>
       </Card>
 
@@ -351,6 +398,36 @@ function A2aInner() {
           <Button variant="contained" disabled={!form.name.trim() || (form.target_type === "external" ? !form.url.trim() : !form.target_agent_id)} onClick={() => void submit()}>
             保存
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Agent Card JSON 详情 */}
+      <Dialog
+        open={cardFor !== null}
+        onClose={() => setCardFor(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Agent Card — {cardFor}</DialogTitle>
+        <DialogContent>
+          <Box
+            component="pre"
+            sx={{
+              m: 0,
+              p: 2,
+              borderRadius: 1,
+              bgcolor: "action.hover",
+              fontFamily: "monospace",
+              fontSize: 12,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+            }}
+          >
+            {cardJson || "加载中…"}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCardFor(null)}>关闭</Button>
         </DialogActions>
       </Dialog>
 

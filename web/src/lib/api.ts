@@ -1077,7 +1077,23 @@ export function runTaskNow(
 ): Promise<{ ok: boolean; run_id: number; status: string }> {
   return request(`/tasks/${id}/run`, { method: "POST" });
 }
-export function listTaskRuns(id: number): Promise<TaskRunInfo[]> { return request(`/tasks/${id}/runs`); }
+export function listTaskRuns(
+  id: number,
+  limit = 20,
+  offset = 0,
+): Promise<TaskRunInfo[]> {
+  return request(`/tasks/${id}/runs?limit=${limit}&offset=${offset}`);
+}
+
+/** 获取 Agent 的 A2A Card JSON（公开端点，无需鉴权）。 */
+export function getAgentCard(slug: string): Promise<Record<string, unknown>> {
+  return fetch(`/a2a/${encodeURIComponent(slug)}/.well-known/agent-card.json`, {
+    cache: "no-store",
+  }).then((r) => {
+    if (!r.ok) throw new Error(`获取 Agent Card 失败: HTTP ${r.status}`);
+    return r.json();
+  });
+}
 
 // 健康检查（公开端点，不含 /api 前缀）——用于页面显示服务版本
 export async function getHealth(): Promise<{ status: string; service: string; version: string }> {

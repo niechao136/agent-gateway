@@ -168,11 +168,24 @@ async def sweep(user: CurrentUser):
 
 
 @router.get("/{task_id}/runs", response_model=list[dict])
-async def task_runs(task_id: int, user: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]):
+async def task_runs(
+    task_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 20,
+    offset: int = 0,
+):
+    """分页返回执行历史（默认最近 20 条，limit 上限 200）。"""
     await _task_or_404(session, task_id, user)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     rows = (
         await session.execute(
-            select(TaskRun).where(TaskRun.task_id == task_id).order_by(TaskRun.id.desc()).limit(50)
+            select(TaskRun)
+            .where(TaskRun.task_id == task_id)
+            .order_by(TaskRun.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
     return [

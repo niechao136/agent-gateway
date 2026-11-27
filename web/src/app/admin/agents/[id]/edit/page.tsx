@@ -671,6 +671,12 @@ function EditInner() {
       {tab === 5 && (
         <Card>
           <CardContent>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              A2A（Agent-to-Agent）让本 Agent 把任务委托给其他 Agent。勾选出站端点后，
+              本 Agent 会在对话中自动调用对方能力（如天气、地图）。端点只有绑定到
+              <b>已发布（published）</b> 的 Agent 才可用；端点的 Agent Card JSON
+              可在「A2A」页面查看。绑定后会自动启用 a2a 工具集（不可关闭）。
+            </Alert>
             <Stack spacing={1.5}>
               <Stack direction="row" sx={{ alignItems: "center" }}>
                 <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
